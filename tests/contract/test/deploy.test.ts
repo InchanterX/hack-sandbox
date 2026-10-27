@@ -32,8 +32,8 @@ describe('deploy catalogs', () => {
   it('images.yaml builds exactly server and web', () => {
     const images = readYaml<{ images: unknown[] }>('deploy/images.yaml');
     assert.deepEqual(images.images, [
-      { name: 'server', context: 'server', dockerfile: 'Dockerfile' },
-      { name: 'web', context: 'web', dockerfile: 'Dockerfile' },
+      { name: 'server', context: 'server', dockerfile: 'server/Dockerfile' },
+      { name: 'web', context: 'web', dockerfile: 'web/Dockerfile' },
     ]);
   });
 
