@@ -1,0 +1,51 @@
+# golangci-lint 2.x configuration of the backend (brief/04_stack/backend.md).
+# The scaffold copies this file to server/.golangci.yml (no leading dot here: brief upload skips
+# dotfiles); tasks do not edit it.
+version: "2"
+run:
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - errcheck     # ERR-2
+    - errorlint    # ERR-6, ERR-12
+    - nilerr       # ERR-4
+    - wrapcheck    # ERR-6, ERR-13
+    - errname      # ERR-10, ERR-11
+    - govet        # CORE-15, CORE-24
+    - staticcheck
+    - bodyclose
+    - noctx        # CONC-5
+    - containedctx # CONC-5: no context.Context in structs
+    - revive       # naming and doc comments (NAME-*)
+    - misspell
+    - unconvert
+    - unparam
+    - prealloc     # CORE-20, PERF-3
+    - copyloopvar
+    - usetesting   # TEST-7
+    - gosec        # CORE-39
+    - nolintlint   # every //nolint names the linter and says why
+  settings:
+    gosec:
+      excludes:
+        - G104 # unhandled errors: errcheck reports them
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - wrapcheck
+          - noctx
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
