@@ -10,7 +10,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type store struct{ pool *pgxpool.Pool }
+type store struct {
+	pool *pgxpool.Pool
+	// locked, when set, runs after a mutation locks its row; tests use it to hold the lock.
+	locked func()
+}
 
 var _ reader = (*store)(nil)
 var _ mutator = (*store)(nil)
@@ -69,6 +73,9 @@ func (s *store) update(ctx context.Context, user, id uuid.UUID, expression strin
 	if err != nil {
 		return task{}, fmt.Errorf("lock task: %w", err)
 	}
+	if s.locked != nil {
+		s.locked()
+	}
 	if status != "queued" {
 		return task{}, errNotQueued
 	}
@@ -97,6 +104,9 @@ func (s *store) delete(ctx context.Context, user, id uuid.UUID) error {
 	}
 	if err != nil {
 		return fmt.Errorf("lock task: %w", err)
+	}
+	if s.locked != nil {
+		s.locked()
 	}
 	if status == "running" {
 		return errRunning
