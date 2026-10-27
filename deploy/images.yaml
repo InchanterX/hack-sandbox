@@ -6,7 +6,7 @@ version: 1
 images:
   - name: server
     context: server
-    dockerfile: Dockerfile
+    dockerfile: server/Dockerfile
   - name: web
     context: web
-    dockerfile: Dockerfile
+    dockerfile: web/Dockerfile
