@@ -377,7 +377,9 @@ web/package-lock.json
 web/index.html
 web/vite.config.ts
 web/vitest.config.ts
-web/tsconfig*.json
+web/tsconfig.json
+web/tsconfig.app.json
+web/tsconfig.node.json
 web/eslint.config.js
 web/src/main.tsx
 web/src/router.tsx
