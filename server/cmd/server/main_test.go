@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -370,16 +371,32 @@ func TestServeAnswersTheTenRoutes(t *testing.T) {
 	}
 }
 
+func TestLogConfigOmitsTheDatabasePassword(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	logConfig(t.Context(), server.Config{Port: 8080, DatabaseURL: "postgres://calc:s3cret@db:5432/calc",
+		Workers: 2, OpDelay: 700 * time.Millisecond, PollInterval: 300 * time.Millisecond, SessionTTL: time.Hour})
+	if out := buf.String(); strings.Contains(out, "s3cret") || !strings.Contains(out, `"workers":2`) {
+		t.Errorf("config log = %s, want the settings without the password", out)
+	}
+}
+
+// The grace tests run the real shutdownGrace, in parallel to save wall time.
+
 func TestStopLetsActiveWorkFinishWithinGrace(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	userID := h.seed(t)
 	active := h.insert(t, userID, "2 + 3 * (4 - 1)", 0, "")
 	cfg := h.cfg
 	// One worker: after stop it is busy with the active task, so nothing else
-	// may claim the task created after stop.
-	cfg.Workers, cfg.OpDelay = 1, 300*time.Millisecond
-	grace := 5 * time.Second
-	_, stop := serveApp(t, startApp(t, cfg), grace)
+	// may claim the task created after stop. Three 2 s operations: the task
+	// needs about 6 s after the stop, inside the 10 s grace.
+	cfg.Workers, cfg.OpDelay = 1, 2*time.Second
+	_, stop := serveApp(t, startApp(t, cfg), shutdownGrace)
 
 	waitFor(t, 5*time.Second, "the task to run", func() bool { return h.row(t, active).Status == "running" })
 	began := time.Now()
@@ -389,8 +406,8 @@ func TestStopLetsActiveWorkFinishWithinGrace(t *testing.T) {
 	if err := <-stopped; err != nil {
 		t.Errorf("serve() = %v, want nil when active work finishes in time", err)
 	}
-	if elapsed := time.Since(began); elapsed >= grace {
-		t.Errorf("stop took %v, want the active task to end before the %v grace", elapsed, grace)
+	if elapsed := time.Since(began); elapsed < 4*time.Second || elapsed >= shutdownGrace {
+		t.Errorf("stop took %v, want the active task to run on and end before the %v grace", elapsed, shutdownGrace)
 	}
 	if got := h.row(t, active); got.Status != "done" || got.Result == nil || *got.Result != 11 {
 		t.Errorf("active row = %+v, want done with 11", got)
@@ -401,21 +418,21 @@ func TestStopLetsActiveWorkFinishWithinGrace(t *testing.T) {
 }
 
 func TestStopCancelsWorkAfterGraceAndLeavesItRecoverable(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	userID := h.seed(t)
 	active := h.insert(t, userID, "2 + 3 * (4 - 1)", 0, "")
 	cfg := h.cfg
 	cfg.Workers, cfg.OpDelay = 1, time.Hour
-	grace := 300 * time.Millisecond
-	_, stop := serveApp(t, startApp(t, cfg), grace)
+	_, stop := serveApp(t, startApp(t, cfg), shutdownGrace)
 
 	waitFor(t, 5*time.Second, "the task to run", func() bool { return h.row(t, active).Status == "running" })
 	began := time.Now()
 	if err := stop(); err != nil {
 		t.Errorf("serve() = %v, want nil: interrupted tasks are recovered, not a failed stop", err)
 	}
-	if elapsed := time.Since(began); elapsed < grace || elapsed > grace+stopTimeout {
-		t.Errorf("stop took %v, want the %v grace and then cancellation", elapsed, grace)
+	if elapsed := time.Since(began); elapsed < shutdownGrace || elapsed > shutdownGrace+stopTimeout {
+		t.Errorf("stop took %v, want the %v grace and then cancellation", elapsed, shutdownGrace)
 	}
 	if got := h.row(t, active); got.Status != "running" || got.ErrorCode != nil || got.FinishedAt != nil {
 		t.Errorf("interrupted row = %+v, want still running, not failed", got)

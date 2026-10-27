@@ -66,7 +66,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	slog.InfoContext(ctx, "Starting server", "config", cfg)
+	logConfig(ctx, cfg)
 
 	a, err := start(ctx, cfg, connectTimeout)
 	if err != nil {
@@ -80,6 +80,12 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return fmt.Errorf("listen on %s: %w", cfg.Addr(), err)
 	}
 	return a.serve(ctx, ln, shutdownGrace)
+}
+
+// logConfig logs the configuration except DatabaseURL, which carries the password.
+func logConfig(ctx context.Context, cfg server.Config) {
+	slog.InfoContext(ctx, "Starting server", "port", cfg.Port, "workers", cfg.Workers,
+		"op_delay", cfg.OpDelay, "poll_interval", cfg.PollInterval, "session_ttl", cfg.SessionTTL)
 }
 
 // app is the started server: migrated, recovered and ready to serve.
@@ -119,7 +125,8 @@ func start(ctx context.Context, cfg server.Config, connectBudget time.Duration) 
 // close releases the database pool.
 func (a *app) close() { a.pool.Close() }
 
-// serve runs HTTP on ln and the workers until ctx is canceled. Then it stops
+// serve runs HTTP on ln and the workers until ctx is canceled, HTTP fails or
+// the workers give up on a failing store. Then it stops
 // new claims and HTTP intake, waits up to grace for active requests and
 // evaluations, cancels execution and waits up to stopTimeout for the workers.
 // Tasks interrupted this way stay running for the next start; that is a
@@ -147,19 +154,20 @@ func (a *app) serve(ctx context.Context, ln net.Listener, grace time.Duration) e
 		stopClaims()
 		cancelExec()
 		return errors.Join(fmt.Errorf("serve http: %w", err), waitWorkers(workersDone))
+	case err := <-workersDone:
+		// Run returns before a stop only when the store keeps failing; the
+		// restarted process recovers. Requests in flight still get the grace.
+		slog.ErrorContext(ctx, "Queue workers stopped, shutting down", "error", err)
+		graceCtx, cancelGrace := context.WithTimeout(context.WithoutCancel(ctx), grace)
+		defer cancelGrace()
+		return errors.Join(fmt.Errorf("run queue workers: %w", err), shutdownHTTP(graceCtx, srv))
 	}
 	slog.InfoContext(ctx, "Shutting down", "grace", grace)
 	stopClaims()
 
 	graceCtx, cancelGrace := context.WithTimeout(context.WithoutCancel(ctx), grace)
 	defer cancelGrace()
-	var errs []error
-	if err := srv.Shutdown(graceCtx); err != nil {
-		errs = append(errs, fmt.Errorf("shutdown http: %w", err))
-		if err := srv.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close http: %w", err))
-		}
-	}
+	errs := []error{shutdownHTTP(graceCtx, srv)}
 	select {
 	case err := <-workersDone:
 		errs = append(errs, workerError(err))
@@ -169,6 +177,20 @@ func (a *app) serve(ctx context.Context, ln net.Listener, grace time.Duration) e
 		errs = append(errs, waitWorkers(workersDone))
 	}
 	return errors.Join(errs...)
+}
+
+// shutdownHTTP stops intake and waits for active requests until ctx ends, then
+// closes the remaining connections.
+func shutdownHTTP(ctx context.Context, srv *http.Server) error {
+	err := srv.Shutdown(ctx)
+	if err == nil {
+		return nil
+	}
+	err = fmt.Errorf("shutdown http: %w", err)
+	if cerr := srv.Close(); cerr != nil {
+		err = errors.Join(err, fmt.Errorf("close http: %w", cerr))
+	}
+	return err
 }
 
 // waitWorkers waits up to stopTimeout for the result of queue.Pool.Run.
