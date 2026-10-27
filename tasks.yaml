@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=https://github.com/InchanterX/the-silent-orchestra/contracts/schemas/tasks-file.schema.json
+# S3: plan DAG. Validate with `orchestra validate-tasks tasks.yaml`.
+# Patterns are gitignore-style globs anchored at the repo root ("**/x" = any depth).
+version: 1
+project_id: sandbox
+
+shared_files:            # owned by scaffold; tasks ask the Conductor to change these
+  - package.json
+  - compose.yaml
+  - deploy/images.yaml
+
+defaults:
+  max_attempts: 3
+  check_env: { kind: compose, file: compose.yaml, service: dev }
+  checks:
+    - { name: lint, cmd: "npm run lint" }
+    - { name: unit, cmd: "npm test" }
+    - { name: contract, cmd: "npm run test:contract" }
+
+tasks:
+  - id: T01
+    title: Scaffold
+    stage: S4
+    mode: solo
+    tier: T1
+    owned_files: ["**"]
+    acceptance_criteria:
+      - compose up starts every service; stubs answer per contracts/
+      - contract tests exist and run in CI
+    context_refs: [SPEC.md, contracts/]
+    stack: [backend, frontend, devops]
+    estimate_min: 30
+
+  - id: T02
+    title: Example feature
+    depends_on: [T01]
+    tier: T2
+    owned_files: ["src/feature/**"]
+    acceptance_criteria: [Describe an observable outcome]
+    context_refs: [SPEC.md]
+    stack: [backend]          # brief/04_stack/backend.md goes into the packet
+    estimate_min: 25

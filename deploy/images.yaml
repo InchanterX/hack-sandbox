@@ -1,0 +1,7 @@
+# yaml-language-server: $schema=https://github.com/InchanterX/the-silent-orchestra/contracts/schemas/images-file.schema.json
+# Images the Conductor builds in-cluster (BuildKit) on every release and pushes to
+# <registry>/hack-<project>/<name>:<sha>. Owned by scaffold (S4); list it in shared_files.
+version: 1
+images:
+  - name: app
+    context: .
