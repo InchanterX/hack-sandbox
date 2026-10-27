@@ -28,7 +28,7 @@ export function TaskItem({ task }: { task: Task }) {
   const inputId = useId();
   const errorId = useId();
 
-  const canEdit = task.status === 'queued';
+  const canEdit = task.status === 'queued' && conflict === null;
   const canDelete = task.status !== 'running';
 
   const startEditing = () => {
@@ -47,7 +47,7 @@ export function TaskItem({ task }: { task: Task }) {
     event.preventDefault();
     const invalid = validateExpression(draft);
     setFieldError(invalid);
-    if (invalid || update.isPending) {
+    if (invalid || update.isPending || !canEdit) {
       return;
     }
     update.mutate(
@@ -57,6 +57,7 @@ export function TaskItem({ task }: { task: Task }) {
         onError: (cause) => {
           if (cause instanceof ApiRequestError && cause.status === 409) {
             setConflict(cause.message);
+            setEditing(false);
           } else {
             setFieldError(errorText(cause));
           }
@@ -75,18 +76,18 @@ export function TaskItem({ task }: { task: Task }) {
   return (
     <tr className={styles.row} data-status={task.status}>
       <td className={styles.expression} data-label="Выражение">
-        {editing ? (
+        {editing || conflict !== null ? (
           <>
-            <form id={formId} onSubmit={save} noValidate />
+            {editing && <form id={formId} onSubmit={save} noValidate />}
             <label htmlFor={inputId} className={styles.hidden}>
               Выражение задачи
             </label>
             <input
               id={inputId}
-              form={formId}
+              form={editing ? formId : undefined}
               className={styles.input}
               value={draft}
-              readOnly={conflict !== null}
+              readOnly={!editing}
               autoComplete="off"
               spellCheck={false}
               aria-invalid={fieldError !== null}

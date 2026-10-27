@@ -134,7 +134,7 @@ describe('Task actions by status', () => {
     expect(screen.getByRole('button', { name: 'Изменить' })).toBeInTheDocument();
   });
 
-  it('shows 409 at the action, keeps the typed text and removes Сохранить', async () => {
+  it('closes the edit action on 409 and keeps a read-only draft even if the refreshed snapshot is queued', async () => {
     tasks = [makeTask({ expression: '1 + 1' })];
     renderApp('/');
     const user = userEvent.setup();
@@ -144,7 +144,40 @@ describe('Task actions by status', () => {
     await user.click(screen.getByRole('button', { name: 'Сохранить' }));
     expect(await screen.findByText('задача уже выполняется')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Выражение задачи' })).toHaveValue('1 + 10');
+    expect(screen.getByRole('textbox', { name: 'Выражение задачи' })).toHaveAttribute('readonly');
     expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Изменить' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Отмена' })).toBeNull();
+    expect(get.mock.calls.filter(([path]) => path === '/api/tasks')).toHaveLength(2);
+    // Enter in the retained copyable draft cannot resubmit the unavailable edit.
+    await user.click(screen.getByRole('textbox', { name: 'Выражение задачи' }));
+    await user.keyboard('{Enter}');
+    expect(patch).toHaveBeenCalledOnce();
+  });
+
+  it('refreshes a 409 edit conflict to running, hides actions and preserves the draft for copying', async () => {
+    tasks = [makeTask({ expression: '1 + 1' })];
+    renderApp('/');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Изменить' }));
+    const input = screen.getByRole('textbox', { name: 'Выражение задачи' });
+    await user.clear(input);
+    await user.type(input, '99 + 1');
+    patch.mockImplementationOnce(() => {
+      tasks = [makeTask({ expression: '1 + 1', status: 'running' })];
+      return Promise.resolve(apiError(409, 'not_queued', 'изменить можно только задачу в очереди'));
+    });
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    expect(await screen.findByText('изменить можно только задачу в очереди')).toHaveAttribute('role', 'alert');
+    expect(screen.getByText('выполняется')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Выражение задачи' })).toBe(input);
+    expect(input).toHaveValue('99 + 1');
+    expect(input).toHaveAttribute('readonly');
+    expect(buttonsOf(input.closest('tr') as HTMLElement)).toEqual([]);
+    await user.click(input);
+    await user.keyboard('{Control>}a{/Control}');
+    expect(input).toHaveFocus();
+    expect((input as HTMLInputElement).selectionEnd).toBe('99 + 1'.length);
   });
 
   it('deletes a task and updates the list without reload', async () => {
@@ -159,12 +192,19 @@ describe('Task actions by status', () => {
     expect(del).toHaveBeenCalledWith('/api/tasks/{id}', { params: { path: { id: 'a' } } });
   });
 
-  it('shows a delete conflict message', async () => {
-    tasks = [makeTask({ status: 'done', result: 3 })];
+  it('shows a delete conflict message and refreshes to running without delete controls', async () => {
+    tasks = [makeTask({ status: 'queued' })];
     renderApp('/');
-    del.mockResolvedValueOnce(apiError(409, 'task_running', 'задача выполняется'));
+    del.mockImplementationOnce(() => {
+      tasks = [makeTask({ status: 'running' })];
+      return Promise.resolve(apiError(409, 'task_running', 'задача выполняется'));
+    });
     await userEvent.click(await screen.findByRole('button', { name: 'Удалить' }));
     expect(await screen.findByText('задача выполняется')).toBeInTheDocument();
+    expect(screen.getByText('выполняется')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Удалить' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Изменить' })).toBeNull();
+    expect(get.mock.calls.filter(([path]) => path === '/api/tasks')).toHaveLength(2);
   });
 });
 
