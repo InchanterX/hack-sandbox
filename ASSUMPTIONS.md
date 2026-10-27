@@ -18,14 +18,6 @@
 - **State:** active
 - **Affects:** S1
 
-## Q3. Изменённая (PATCH) задача в queued сохраняет место в очереди или встаёт в конец?
-
-- **Assumed:** сохраняет место (created_at не меняется)
-- **Reason:** internal/tasks, порядок забора в internal/queue, возможно поле updated_at
-- **By:** S1-a1-1, 2026-10-27T14:28:50.182013+00:00
-- **State:** active
-- **Affects:** S1
-
 ## Q4. Выражение с запрещённым символом (`2 ^ 3`, `2 + x`): какой код ошибки 422?
 
 - **Assumed:** syntax_error (validation_error — только длина вне 1–200)
