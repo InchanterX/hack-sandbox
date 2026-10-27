@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { client, setAuthToken, setUnauthorizedHandler } from './client';
+import { client, setAuthToken, setUnauthorizedHandler } from '../api/client';
 
 afterEach(() => {
   setAuthToken(null);
