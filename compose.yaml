@@ -1,7 +1,8 @@
 # Local environment and the Conductor check environment (service dev).
-# Required in the environment (or an untracked .env, see .env.example):
-#   POSTGRES_PASSWORD  local database password; never committed.
-# Optional:
+# Works as is, without any environment variables. Optional overrides
+# (environment or an untracked .env, see .env.example):
+#   POSTGRES_PASSWORD  local dev database password; defaults to "calc" (dev only,
+#                      in the cluster it comes from Secret db).
 #   DATABASE_URL       dev connection string; when empty, Go code builds it from
 #                      DB_HOST/DB_NAME/DB_USER/POSTGRES_PASSWORD with URL escaping.
 name: calc-queue
@@ -10,7 +11,7 @@ x-db-env: &db-env
   DB_HOST: db
   DB_NAME: calc
   DB_USER: calc
-  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-calc}
 
 services:
   db:
@@ -18,7 +19,7 @@ services:
     environment:
       POSTGRES_DB: calc
       POSTGRES_USER: calc
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-calc}
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
