@@ -1,9 +1,12 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# The Conductor sets the registry and the commit SHA tag of server and web here.
 namespace: hack-sandbox
 resources:
-  - ../../base
+- ../../base
 images:
-  - name: server
-  - name: web
+- name: server
+  newName: registry.faberge-eggs.ru/hackathons/sandbox/server
+  newTag: 6cb5e234c4aac3de3df6c78e1fb9cf8f6f39ec2e
+- name: web
+  newName: registry.faberge-eggs.ru/hackathons/sandbox/web
+  newTag: 6cb5e234c4aac3de3df6c78e1fb9cf8f6f39ec2e
