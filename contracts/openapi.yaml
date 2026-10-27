@@ -1,0 +1,398 @@
+openapi: 3.1.0
+info:
+  title: Calc Queue API
+  version: 1.0.0
+  description: |
+    Must-only API. JSON field names are snake_case; instants are UTC RFC 3339.
+    Every error is an ErrorEnvelope with a Russian message. Authentication is
+    checked before resource lookup. Foreign, missing and malformed task IDs all
+    return 404. No filtering, pagination, SSE or external services are included.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+  - name: Tasks
+  - name: Health
+paths:
+  /api/auth/register:
+    post:
+      operationId: register
+      tags: [Auth]
+      security: []
+      summary: Register and immediately create a session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Credentials'}
+      responses:
+        '201':
+          description: User and a new opaque session; default expiry is 24 hours
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthSession'}
+        '409': {$ref: '#/components/responses/LoginTaken'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/auth/login:
+    post:
+      operationId: login
+      tags: [Auth]
+      security: []
+      summary: Create a session for an existing user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Credentials'}
+      responses:
+        '200':
+          description: New opaque session
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthSession'}
+        '401': {$ref: '#/components/responses/InvalidCredentials'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/auth/logout:
+    post:
+      operationId: logout
+      tags: [Auth]
+      summary: Delete the current session
+      responses:
+        '204': {description: Session deleted; no response body}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/me:
+    get:
+      operationId: getMe
+      tags: [Auth]
+      summary: Return the authenticated user
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/User'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/tasks:
+    post:
+      operationId: createTask
+      tags: [Tasks]
+      summary: Validate syntax and enqueue an expression
+      description: |
+        Length is checked before parsing. Length outside 1–200 is validation_error;
+        illegal characters or grammar are syntax_error. Division by zero and
+        overflow are evaluated asynchronously, never rejected as syntax errors.
+        The response is the inserted queued snapshot even if a worker claims it
+        before the client receives the response.
+      requestBody: {$ref: '#/components/requestBodies/Expression'}
+      responses:
+        '201':
+          description: A queued task with null execution fields
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Task'}
+              example:
+                id: 00000000-0000-4000-8000-000000000002
+                expression: 2 + 3 * (4 - 1)
+                status: queued
+                result: null
+                error: null
+                created_at: '2026-10-27T12:00:00Z'
+                started_at: null
+                finished_at: null
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '422': {$ref: '#/components/responses/ExpressionError'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    get:
+      operationId: listTasks
+      tags: [Tasks]
+      summary: List only the current user's tasks, newest first
+      description: Ordered by created_at DESC, id DESC for ties. Empty means items is [].
+      responses:
+        '200':
+          description: All own tasks; no pagination or status filter
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TaskList'}
+              example: {items: []}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/tasks/{id}:
+    parameters:
+      - $ref: '#/components/parameters/TaskID'
+    get:
+      operationId: getTask
+      tags: [Tasks]
+      summary: Read one own task
+      responses:
+        '200':
+          description: Own task
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Task'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    patch:
+      operationId: updateTask
+      tags: [Tasks]
+      summary: Replace the expression of an own queued task
+      description: |
+        Lock the owned row in a transaction, check status, validate expression,
+        then update conditionally. Lookup/status errors take precedence over
+        expression validation for a structurally valid request. Preserve id and
+        created_at (queue position). Return the updated queued snapshot.
+      requestBody: {$ref: '#/components/requestBodies/Expression'}
+      responses:
+        '200':
+          description: Updated queued task
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Task'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/NotQueued'}
+        '422': {$ref: '#/components/responses/ExpressionError'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    delete:
+      operationId: deleteTask
+      tags: [Tasks]
+      summary: Delete an own task unless it is running
+      description: Lock the owned row and conditionally delete within one transaction.
+      responses:
+        '204': {description: Task deleted; no response body}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/TaskRunning'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/healthz:
+    get:
+      operationId: healthz
+      tags: [Health]
+      security: []
+      summary: Check server readiness and database connectivity
+      responses:
+        '200':
+          description: Migrations and recovery complete; database ping succeeds
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Health'}
+              example: {status: ok}
+        '503': {$ref: '#/components/responses/Unavailable'}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque base64url token
+      description: 32 random bytes encoded without padding; only SHA-256 is stored.
+  parameters:
+    TaskID:
+      name: id
+      in: path
+      required: true
+      description: |
+        A UUID serialized as text. Deliberately no schema format validation:
+        handlers return 404 not_found for malformed UUIDs, never 422.
+      schema: {type: string}
+      example: 00000000-0000-4000-8000-000000000002
+  requestBodies:
+    Expression:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ExpressionInput'}
+          example: {expression: '2 + 3 * (4 - 1)'}
+  schemas:
+    Credentials:
+      type: object
+      additionalProperties: false
+      required: [login, password]
+      properties:
+        login:
+          type: string
+          pattern: '^[a-z0-9_-]{3,32}$'
+          minLength: 3
+          maxLength: 32
+          description: Exact login; no case conversion or whitespace trimming.
+          example: alice
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          minLength: 1
+          maxLength: 72
+          x-min-utf8-bytes: 8
+          x-max-utf8-bytes: 72
+          description: |
+            8–72 UTF-8 bytes, not Unicode characters. Enforced by server and
+            TextEncoder in the UI; JSON Schema minLength cannot encode byte length.
+    User:
+      type: object
+      additionalProperties: false
+      required: [id, login, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        login: {type: string, pattern: '^[a-z0-9_-]{3,32}$'}
+        created_at: {type: string, format: date-time, description: UTC RFC 3339}
+    AuthSession:
+      type: object
+      additionalProperties: false
+      required: [token, expires_at, user]
+      properties:
+        token: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
+        expires_at: {type: string, format: date-time, description: UTC RFC 3339}
+        user: {$ref: '#/components/schemas/User'}
+    ExpressionInput:
+      type: object
+      additionalProperties: false
+      required: [expression]
+      properties:
+        expression:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: |
+            Count Unicode code points before syntax validation. Allowed ASCII
+            characters are digits, dot, + - * /, parentheses and U+0020 space.
+            Number grammar is [0-9]+(\.[0-9]+)?; 007 is valid, .5 and 5. are not.
+            No exponent notation, unary plus, tabs or newlines. --5 is valid.
+    TaskStatus:
+      type: string
+      enum: [queued, running, done, failed]
+    ComputationError:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code: {type: string, enum: [division_by_zero, overflow]}
+        message:
+          type: string
+          enum: [деление на ноль, переполнение]
+          description: division_by_zero maps to деление на ноль; overflow to переполнение.
+    Task:
+      type: object
+      additionalProperties: false
+      required: [id, expression, status, result, error, created_at, started_at, finished_at]
+      description: |
+        queued: result/error/started_at/finished_at null.
+        running: started_at set, result/error/finished_at null.
+        done: result finite, error null, started_at/finished_at set.
+        failed: result null, error set, started_at/finished_at set.
+        All nullable properties are present, never omitted. user_id is private.
+        Result is float64 rounded once at the end to 10 fractional digits; -0 is 0.
+      properties:
+        id: {type: string, format: uuid}
+        expression: {type: string, minLength: 1, maxLength: 200}
+        status: {$ref: '#/components/schemas/TaskStatus'}
+        result: {type: [number, 'null'], format: double}
+        error:
+          anyOf:
+            - $ref: '#/components/schemas/ComputationError'
+            - type: 'null'
+        created_at: {type: string, format: date-time, description: UTC RFC 3339}
+        started_at: {type: [string, 'null'], format: date-time}
+        finished_at: {type: [string, 'null'], format: date-time}
+    TaskList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Task'}
+    ErrorCode:
+      type: string
+      enum: [unauthorized, invalid_credentials, login_taken, validation_error,
+             syntax_error, not_found, not_queued, task_running, internal_error, unavailable]
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code: {$ref: '#/components/schemas/ErrorCode'}
+        message: {type: string, minLength: 1, description: Russian text; never secrets or SQL details}
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error: {$ref: '#/components/schemas/ApiError'}
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: {type: string, const: ok}
+  responses:
+    Unauthorized:
+      description: Missing, expired, revoked or invalid Bearer token; code unauthorized
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+          example: {error: {code: unauthorized, message: требуется вход}}
+    InvalidCredentials:
+      description: Well-formed credentials do not match a user; code invalid_credentials
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+          example: {error: {code: invalid_credentials, message: неверный логин или пароль}}
+    LoginTaken:
+      description: Exact login already exists; code login_taken
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+          example: {error: {code: login_taken, message: логин занят}}
+    ValidationError:
+      description: Invalid shape, length, login, password byte length or JSON; code validation_error
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+          example: {error: {code: validation_error, message: проверьте поля формы}}
+    ExpressionError:
+      description: |
+        code validation_error for invalid body or length outside 1–200;
+        code syntax_error for illegal characters or invalid grammar.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+          examples:
+            syntax:
+              value: {error: {code: syntax_error, message: 'синтаксическая ошибка: неожиданный символ в позиции 5'}}
+            length:
+              value: {error: {code: validation_error, message: выражение должно содержать от 1 до 200 символов}}
+    NotFound:
+      description: Missing, foreign or malformed task ID; code not_found
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+          example: {error: {code: not_found, message: задача не найдена}}
+    NotQueued:
+      description: Own task is not queued; code not_queued
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+          example: {error: {code: not_queued, message: изменить можно только задачу в очереди}}
+    TaskRunning:
+      description: Own task is running; code task_running
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+          example: {error: {code: task_running, message: выполняющуюся задачу нельзя удалить}}
+    InternalError:
+      description: Unexpected server or database error; code internal_error
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+          example: {error: {code: internal_error, message: внутренняя ошибка сервера}}
+    Unavailable:
+      description: Readiness failed or database unavailable; code unavailable
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+          example: {error: {code: unavailable, message: база данных недоступна}}

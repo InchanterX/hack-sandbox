@@ -1,0 +1,101 @@
+{
+  "success": [
+    {
+      "expression": "2 + 3 * (4 - 1)",
+      "result": 11
+    },
+    {
+      "expression": "(10 - 4) / 3",
+      "result": 2
+    },
+    {
+      "expression": "100 - 7",
+      "result": 93
+    },
+    {
+      "expression": "8 / 4 / 2",
+      "result": 1
+    },
+    {
+      "expression": "8 - 4 - 2",
+      "result": 2
+    },
+    {
+      "expression": "-2 * (3 + 4)",
+      "result": -14
+    },
+    {
+      "expression": "--5",
+      "result": 5
+    },
+    {
+      "expression": "007",
+      "result": 7
+    },
+    {
+      "expression": "0.1 + 0.2",
+      "result": 0.3
+    },
+    {
+      "expression": "1 / 3",
+      "result": 0.3333333333
+    },
+    {
+      "expression": "-0",
+      "result": 0
+    },
+    {
+      "expression": "-1 / 100000000000",
+      "result": 0
+    }
+  ],
+  "syntax_error": [
+    "2 + * 3",
+    "2 ^ 3",
+    "2 + x",
+    ".5",
+    "5.",
+    "1e3",
+    "+2",
+    "(2 + 3",
+    "2 3",
+    " ",
+    "2\t+3"
+  ],
+  "validation_error": [
+    ""
+  ],
+  "failed": [
+    {
+      "expression": "7 / (2 - 2)",
+      "code": "division_by_zero",
+      "message": "деление на ноль"
+    }
+  ],
+  "generated_cases": [
+    "201 ASCII digits -> HTTP 422 validation_error before parsing",
+    "UTF-8 password with 4 Cyrillic letters (8 bytes) -> valid",
+    "UTF-8 password with 37 Cyrillic letters (74 bytes) -> 422 validation_error",
+    "calculator_only_overflow cases bypass HTTP length validation and exercise defensive evaluator behavior"
+  ],
+  "calculator_only_overflow": [
+    {
+      "expression": "9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 * 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+      "code": "overflow",
+      "message": "переполнение",
+      "reason": "finite operands overflow during multiplication"
+    },
+    {
+      "expression": "1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "code": "overflow",
+      "message": "переполнение",
+      "reason": "finite literal overflows when scaled for rounding"
+    },
+    {
+      "expression": "1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "code": "overflow",
+      "message": "переполнение",
+      "reason": "literal is outside float64 range; accepted grammar, evaluation fails"
+    }
+  ]
+}
