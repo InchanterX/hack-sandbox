@@ -61,3 +61,9 @@
 
 - **Answer:** только \d+(\.\d+)?
 - **By:** status page, 2026-10-27T14:32:41.898279+00:00
+
+## Q13. Push of .github/workflows/ci.yml is rejected (GitHub App lacks workflows permission). Where should CI live?
+
+- **Answer:** CI на GitHub не нужен: проверки запускает дирижёр по defaults.checks. Не добавляй ни .github/workflows/, ни шаблон ci/github-actions.yml, ни scripts/ci.sh — удали их, если уже создал.
+- **By:** status page, 2026-10-27T15:53:11.093139+00:00
+- **Overrides an assumption** (see ASSUMPTIONS.md)

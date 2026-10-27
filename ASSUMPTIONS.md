@@ -5,7 +5,7 @@
 ## Q13. Push of .github/workflows/ci.yml is rejected (GitHub App lacks workflows permission). Where should CI live?
 
 - **Assumed:** Commit ci/github-actions.yml template + scripts/ci.sh; a human copies the template into .github/workflows/
-- **Reason:** Whether CI actually runs on GitHub without manual step
+- **Reason:** the agent's assumption
 - **By:** T01-a3-3, 2026-10-27T15:44:59.321298+00:00
-- **State:** active
+- **State:** overridden by Q13
 - **Affects:** T01
