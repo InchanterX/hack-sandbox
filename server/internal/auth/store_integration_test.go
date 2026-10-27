@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -102,24 +103,24 @@ func TestStoreConcurrentRegistration(t *testing.T) {
 	const attempts = 8
 	start := make(chan struct{})
 	// Each worker sends exactly once; capacity lets all workers finish before collection.
-	results := make(chan int, attempts)
+	results := make(chan *httptest.ResponseRecorder, attempts)
 	var wg sync.WaitGroup
 	for range attempts {
 		wg.Go(func() {
 			<-start
 			w := request(t, http.HandlerFunc(h.Register), "POST", "/api/auth/register", `{"login":"racing","password":"12345678"}`, "")
-			if w.Code == 409 {
-				assertError(t, w, 409, "login_taken", "логин занят")
-			}
-			results <- w.Code
+			results <- w
 		})
 	}
 	close(start)
 	wg.Wait()
 	close(results)
 	counts := make(map[int]int)
-	for status := range results {
-		counts[status]++
+	for w := range results {
+		counts[w.Code]++
+		if w.Code == 409 {
+			assertError(t, w, 409, "login_taken", "логин занят")
+		}
 	}
 	if diff := cmp.Diff(map[int]int{201: 1, 409: attempts - 1}, counts); diff != "" {
 		t.Errorf("concurrent registration status counts (-want +got):\n%s", diff)
