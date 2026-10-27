@@ -26,3 +26,19 @@ body {
   font-family: var(--font-ui);
   font-size: var(--font-size);
 }
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}

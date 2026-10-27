@@ -1,0 +1,53 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space);
+  color: var(--status-color);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dot {
+  width: var(--space);
+  height: var(--space);
+  border-radius: 50%;
+  background: var(--status-color);
+}
+
+.queued {
+  --status-color: var(--color-queued);
+}
+
+.running {
+  --status-color: var(--color-running);
+}
+
+.done {
+  --status-color: var(--color-done);
+}
+
+.failed {
+  --status-color: var(--color-failed);
+}
+
+.running .dot {
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(1.4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .running .dot {
+    animation: none;
+  }
+}

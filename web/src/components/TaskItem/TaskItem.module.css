@@ -1,0 +1,93 @@
+.row td {
+  padding: var(--space) calc(var(--space) * 1.5);
+  text-align: left;
+  vertical-align: top;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.failed {
+  color: var(--color-failed);
+}
+
+.time {
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space);
+}
+
+.actions button {
+  padding: var(--space) calc(var(--space) * 1.5);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.actions button:disabled {
+  opacity: 0.6;
+}
+
+.input {
+  width: 100%;
+  min-width: 0;
+  padding: var(--space);
+  border: 1px solid var(--color-muted);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+}
+
+.error {
+  margin: 0;
+  color: var(--color-failed);
+}
+
+.error:empty {
+  display: none;
+}
+
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .row {
+    display: block;
+    margin-bottom: calc(var(--space) * 2);
+    padding: var(--space);
+    border-radius: var(--radius);
+    background: var(--color-surface);
+  }
+
+  .row td {
+    display: block;
+    padding: calc(var(--space) / 2) var(--space);
+  }
+
+  .row td[data-label]::before {
+    content: attr(data-label) ': ';
+    color: var(--color-muted);
+  }
+
+  .row td.expression::before {
+    content: none;
+  }
+
+  .actions {
+    display: flex;
+  }
+}

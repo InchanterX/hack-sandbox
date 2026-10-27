@@ -1,0 +1,38 @@
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  table-layout: auto;
+}
+
+.table th {
+  padding: var(--space) calc(var(--space) * 1.5);
+  color: var(--color-muted);
+  font-weight: 500;
+  text-align: left;
+}
+
+.caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+@media (max-width: 640px) {
+  .table,
+  .table tbody {
+    display: block;
+    background: none;
+  }
+
+  .head {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}

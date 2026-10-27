@@ -9,7 +9,8 @@ export interface AuthState {
   user: User | null;
   isLoading: boolean;
   signIn: (session: AuthSession) => void;
-  signOut: () => void;
+  /** Calls the logout API; the local session is cleared even if the request fails. */
+  signOut: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthState | null>(null);
