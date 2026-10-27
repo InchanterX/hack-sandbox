@@ -23,7 +23,7 @@ describe('StatusBadge', () => {
     ['failed', 'ошибка'],
   ] as const)('labels %s as %s', (status, label) => {
     render(<StatusBadge status={status} />);
-    expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(label);
   });
 });
 

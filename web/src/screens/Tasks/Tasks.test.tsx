@@ -294,3 +294,44 @@ describe('Polling', () => {
     expect(screen.getByRole('button', { name: 'Отмена' })).toBeInTheDocument();
   });
 });
+
+describe('Task keyboard controls', () => {
+  it('reaches logout, create, edit, save and cancel using Tab and Enter', async () => {
+    tasks = [makeTask()];
+    renderApp('/');
+    const user = userEvent.setup();
+    await screen.findByRole('button', { name: 'Изменить' });
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Выйти' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByLabelText('Выражение')).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Вычислить' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Изменить' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('textbox', { name: 'Выражение задачи' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Отмена' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(screen.queryByRole('textbox', { name: 'Выражение задачи' })).toBeNull();
+  });
+
+  it('retries a failed list using the keyboard and announces the error', async () => {
+    listError = new TypeError('offline');
+    renderApp('/');
+    const user = userEvent.setup();
+    const retry = await screen.findByRole('button', { name: 'Повторить' });
+    expect(retry.closest('[role="alert"]')).toHaveTextContent('Не удалось связаться с сервером');
+    await user.tab();
+    await user.tab();
+    await user.tab();
+    await user.tab();
+    expect(retry).toHaveFocus();
+    listError = null;
+    await user.keyboard('{Enter}');
+    expect((await screen.findByText('Задач пока нет — отправьте первое выражение')).closest('[role="status"]')).toBeInTheDocument();
+  });
+});

@@ -3,7 +3,24 @@
   border-collapse: collapse;
   border-radius: var(--radius);
   background: var(--color-surface);
-  table-layout: auto;
+  table-layout: fixed;
+  overflow-wrap: anywhere;
+}
+
+.table th:nth-child(1) {
+  width: 26%;
+}
+.table th:nth-child(2) {
+  width: 22%;
+}
+.table th:nth-child(3) {
+  width: 15%;
+}
+.table th:nth-child(4) {
+  width: 17%;
+}
+.table th:nth-child(5) {
+  width: 20%;
 }
 
 .table th {

@@ -15,17 +15,21 @@
 
 .time {
   color: var(--color-muted);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space);
+  min-width: 0;
 }
 
 .actions button {
-  padding: var(--space) calc(var(--space) * 1.5);
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: var(--space);
   border: 1px solid var(--color-accent);
   border-radius: var(--radius);
   background: var(--color-surface);
@@ -85,9 +89,5 @@
 
   .row td.expression::before {
     content: none;
-  }
-
-  .actions {
-    display: flex;
   }
 }

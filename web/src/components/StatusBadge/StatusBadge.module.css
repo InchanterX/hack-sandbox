@@ -4,10 +4,12 @@
   gap: var(--space);
   color: var(--status-color);
   font-weight: 600;
-  white-space: nowrap;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .dot {
+  flex-shrink: 0;
   width: var(--space);
   height: var(--space);
   border-radius: 50%;

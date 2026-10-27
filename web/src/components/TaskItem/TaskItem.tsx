@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 
 import { ApiRequestError, errorText } from '../../hooks/apiError';
 import { useDeleteTask, useUpdateTask, type Task } from '../../hooks/useTasks';
@@ -27,6 +27,11 @@ export function TaskItem({ task }: { task: Task }) {
   const formId = useId();
   const inputId = useId();
   const errorId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
 
   const canEdit = task.status === 'queued' && conflict === null;
   const canDelete = task.status !== 'running';
@@ -83,6 +88,7 @@ export function TaskItem({ task }: { task: Task }) {
               Выражение задачи
             </label>
             <input
+              ref={inputRef}
               id={inputId}
               form={editing ? formId : undefined}
               className={styles.input}
@@ -111,35 +117,37 @@ export function TaskItem({ task }: { task: Task }) {
       <td className={styles.time} data-label="Создана">
         <time dateTime={task.created_at}>{timeFormat.format(new Date(task.created_at))}</time>
       </td>
-      <td className={styles.actions}>
-        {editing ? (
-          <>
-            {showSave && (
-              <button type="submit" form={formId} disabled={update.isPending}>
-                Сохранить
+      <td>
+        <div className={styles.actions}>
+          {editing ? (
+            <>
+              {showSave && (
+                <button type="submit" form={formId} disabled={update.isPending}>
+                  Сохранить
+                </button>
+              )}
+              <button type="button" onClick={stopEditing}>
+                Отмена
               </button>
-            )}
-            <button type="button" onClick={stopEditing}>
-              Отмена
-            </button>
-          </>
-        ) : (
-          <>
-            {canEdit && (
-              <button type="button" onClick={startEditing}>
-                Изменить
-              </button>
-            )}
-            {canDelete && (
-              <button type="button" onClick={confirmDelete} disabled={remove.isPending}>
-                Удалить
-              </button>
-            )}
-          </>
-        )}
-        <p className={styles.error} role="alert">
-          {conflict ?? actionError}
-        </p>
+            </>
+          ) : (
+            <>
+              {canEdit && (
+                <button type="button" onClick={startEditing}>
+                  Изменить
+                </button>
+              )}
+              {canDelete && (
+                <button type="button" onClick={confirmDelete} disabled={remove.isPending}>
+                  Удалить
+                </button>
+              )}
+            </>
+          )}
+          <p className={styles.error} role="alert">
+            {conflict ?? actionError}
+          </p>
+        </div>
       </td>
     </tr>
   );

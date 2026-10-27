@@ -15,7 +15,7 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
 
 export function StatusBadge({ status }: { status: TaskStatus }) {
   return (
-    <span className={clsx(styles.badge, styles[status])} data-status={status}>
+    <span className={clsx(styles.badge, styles[status])} data-status={status} role="status" aria-atomic="true">
       <span className={styles.dot} aria-hidden="true" />
       {STATUS_LABELS[status]}
     </span>
