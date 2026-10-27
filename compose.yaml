@@ -1,0 +1,82 @@
+# Local environment and the Conductor check environment (service dev).
+# Required in the environment (or an untracked .env, see .env.example):
+#   POSTGRES_PASSWORD  local database password; never committed.
+# Optional:
+#   DATABASE_URL       dev connection string; when empty, Go code builds it from
+#                      DB_HOST/DB_NAME/DB_USER/POSTGRES_PASSWORD with URL escaping.
+name: calc-queue
+
+x-db-env: &db-env
+  DB_HOST: db
+  DB_NAME: calc
+  DB_USER: calc
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+
+services:
+  db:
+    image: postgres:17.11-alpine
+    environment:
+      POSTGRES_DB: calc
+      POSTGRES_USER: calc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U calc -d calc"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  server:
+    build:
+      context: server
+      dockerfile: Dockerfile
+    environment:
+      <<: *db-env
+      PORT: "8080"
+      WORKERS: "2"
+      OP_DELAY_MS: "700"
+      POLL_INTERVAL_MS: "300"
+      SESSION_TTL_HOURS: "24"
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    image: node:24.22.1-bookworm-slim
+    working_dir: /app
+    command: ["sh", "-c", "npm ci --no-audit --no-fund && npm run dev"]
+    environment:
+      VITE_API_PROXY_TARGET: http://server:8080
+    volumes:
+      - ./web:/app
+      - web-node-modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - server
+
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /workspace
+    command: ["sleep", "infinity"]
+    environment:
+      <<: *db-env
+      DATABASE_URL: ${DATABASE_URL:-}
+    volumes:
+      - .:/workspace
+      - go-mod:/go/pkg/mod
+      - go-cache:/root/.cache
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:
+  web-node-modules:
+  go-mod:
+  go-cache:
