@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"calcqueue/internal/calc"
+
 	"github.com/google/uuid"
 )
 

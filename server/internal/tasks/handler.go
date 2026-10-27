@@ -14,8 +14,10 @@ import (
 	"calcqueue/internal/openapi"
 )
 
+// Handler serves authenticated task requests.
 type Handler struct{ service *service }
 
+// NewHandler wires the task service and store.
 func NewHandler(pool *pgxpool.Pool) *Handler {
 	s := &store{pool: pool}
 	return &Handler{service: &service{reader: s, mutator: s}}
@@ -44,6 +46,8 @@ func input(w http.ResponseWriter, r *http.Request) (string, bool) {
 	}
 	return v.Expression, true
 }
+
+// Create enqueues a validated expression.
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	user, ok := userID(w, r)
 	if !ok {
@@ -60,6 +64,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	httpjson.Write(w, http.StatusCreated, wire(t))
 }
+
+// List returns the current user’s tasks.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	user, ok := userID(w, r)
 	if !ok {
@@ -76,6 +82,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	httpjson.Write(w, http.StatusOK, openapi.TaskList{Items: items})
 }
+
+// Get returns one owned task.
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	user, ok := userID(w, r)
 	if !ok {
@@ -92,6 +100,8 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	httpjson.Write(w, http.StatusOK, wire(t))
 }
+
+// Update replaces an owned queued expression.
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	user, ok := userID(w, r)
 	if !ok {
@@ -112,6 +122,8 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	httpjson.Write(w, http.StatusOK, wire(t))
 }
+
+// Delete removes an owned non-running task.
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	user, ok := userID(w, r)
 	if !ok {
