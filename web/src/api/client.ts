@@ -2,14 +2,24 @@ import createClient, { type Middleware } from 'openapi-fetch';
 
 import type { paths } from './schema';
 
-/** Scaffold client (T01); T06 owns this file and completes session handling. */
 type UnauthorizedHandler = () => void;
 
 let authToken: string | null = null;
+/** Bumped on every token change; responses to requests of an older session are dropped. */
+let sessionGeneration = 0;
+const requestGeneration = new WeakMap<Request, number>();
+const pendingRequests = new Map<Request, AbortController>();
 let onUnauthorized: UnauthorizedHandler | null = null;
 
 /** Sets the Bearer token sent with every request; null removes the header. */
 export function setAuthToken(token: string | null): void {
+  if (token !== authToken) {
+    sessionGeneration += 1;
+    for (const controller of pendingRequests.values()) {
+      controller.abort();
+    }
+    pendingRequests.clear();
+  }
   authToken = token;
 }
 
@@ -25,13 +35,26 @@ const authMiddleware: Middleware = {
     if (authToken) {
       request.headers.set('Authorization', `Bearer ${authToken}`);
     }
-    return request;
+    const controller = new AbortController();
+    const scopedRequest = new Request(request, {
+      signal: AbortSignal.any([request.signal, controller.signal]),
+    });
+    pendingRequests.set(scopedRequest, controller);
+    requestGeneration.set(scopedRequest, sessionGeneration);
+    return scopedRequest;
   },
   onResponse({ request, response }) {
+    pendingRequests.delete(request);
+    if (requestGeneration.get(request) !== sessionGeneration) {
+      throw new DOMException('the session changed while the request was in flight', 'AbortError');
+    }
     if (response.status === 401 && !publicPaths.has(new URL(request.url).pathname)) {
       onUnauthorized?.();
     }
     return response;
+  },
+  onError({ request }) {
+    pendingRequests.delete(request);
   },
 };
 
