@@ -1,0 +1,28 @@
+/* Design tokens (brief/07_design.md). T06 owns styling beyond this scaffold. */
+:root {
+  --color-bg: #f7f7f8;
+  --color-surface: #ffffff;
+  --color-text: #1d1d1f;
+  --color-muted: #6e6e73;
+  --color-accent: #2f6fed;
+  --color-queued: #8e8e93;
+  --color-running: #d98b00;
+  --color-done: #1f9d55;
+  --color-failed: #d64545;
+  --radius: 8px;
+  --space: 8px;
+  --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --font-size: 16px;
+  --heading-size: 24px;
+  --content-width: 720px;
+  --page-gutter: 16px;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: var(--font-size);
+}
