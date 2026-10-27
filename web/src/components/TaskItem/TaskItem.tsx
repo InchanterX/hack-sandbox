@@ -79,7 +79,7 @@ export function TaskItem({ task }: { task: Task }) {
           <>
             <form id={formId} onSubmit={save} noValidate />
             <label htmlFor={inputId} className={styles.hidden}>
-              Выражение
+              Выражение задачи
             </label>
             <input
               id={inputId}
