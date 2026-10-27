@@ -35,6 +35,14 @@ const (
 // after them the task stays running for the next Recover.
 const finishAttempts = 3
 
+// claimAttempts bounds the consecutive failed claims of one worker, PollInterval
+// apart (30 s with the default 300 ms). A store that stays down that long is
+// not transient: Run stops and reports it, and the restarted process recovers.
+const claimAttempts = 100
+
+// errClaimsFailing reports that a worker exhausted claimAttempts.
+var errClaimsFailing = errors.New("claims keep failing")
+
 // ErrInterrupted reports that canceling the execution context aborted active
 // evaluations; their tasks stay running until the next Recover.
 var ErrInterrupted = errors.New("active tasks interrupted")
@@ -103,21 +111,29 @@ func (p *Pool) Recover(ctx context.Context) error {
 // Run starts the workers and blocks until they exit. Canceling claimCtx stops
 // new claims; active evaluations continue until they finish or executionCtx is
 // canceled. Interrupted tasks stay running for the next Recover and Run
-// returns an error matching ErrInterrupted. Store errors are logged and
-// retried after PollInterval, so they never stop the workers.
+// returns an error matching ErrInterrupted. A failed claim is logged and
+// retried after PollInterval up to claimAttempts times in a row; then every
+// worker stops claiming, finishes its active task and Run returns the store
+// error.
 func (p *Pool) Run(claimCtx, executionCtx context.Context) error {
 	if p.cfg.Workers < 1 {
 		return fmt.Errorf("run queue: workers=%d, want at least 1", p.cfg.Workers)
 	}
+	claimCtx, stopClaims := context.WithCancelCause(claimCtx)
+	defer stopClaims(nil)
 	var interrupted atomic.Int64
 	var wg sync.WaitGroup
 	for i := range p.cfg.Workers {
 		log := slog.With("worker", i+1)
 		wg.Go(func() {
+			failedClaims := 0
 			for {
-				more, stopped := p.next(claimCtx, executionCtx, log)
+				more, stopped, err := p.next(claimCtx, executionCtx, log, &failedClaims)
 				if stopped {
 					interrupted.Add(1)
+				}
+				if err != nil {
+					stopClaims(err)
 				}
 				if !more {
 					return
@@ -126,48 +142,69 @@ func (p *Pool) Run(claimCtx, executionCtx context.Context) error {
 		})
 	}
 	wg.Wait()
+	var errs []error
+	if cause := context.Cause(claimCtx); errors.Is(cause, errClaimsFailing) {
+		errs = append(errs, cause)
+	}
 	if n := interrupted.Load(); n > 0 {
-		return fmt.Errorf("run queue: %d tasks left running: %w: %w", n, ErrInterrupted, context.Cause(executionCtx))
+		errs = append(errs, fmt.Errorf("%d tasks left running: %w: %w", n, ErrInterrupted, context.Cause(executionCtx)))
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("run queue: %w", err)
 	}
 	return nil
 }
 
 // next claims and executes one task, or waits PollInterval when the queue is
 // empty or the store fails. more is false once the worker must exit;
-// interrupted reports a claimed task left running by executionCtx.
-func (p *Pool) next(claimCtx, executionCtx context.Context, log *slog.Logger) (more, interrupted bool) {
-	if claimCtx.Err() != nil || executionCtx.Err() != nil {
-		return false, false
+// interrupted reports a claimed task left running by executionCtx; err is set
+// when the claims failed claimAttempts times in a row, counted in failedClaims.
+func (p *Pool) next(claimCtx, executionCtx context.Context, log *slog.Logger, failedClaims *int) (
+	more, interrupted bool, err error,
+) {
+	if claimCtx.Err() != nil {
+		return false, false, nil
 	}
-	// The claim runs under executionCtx: a claim already sent when claimCtx is
-	// canceled is not torn mid-statement, its task is executed as active work.
-	j, ok, err := p.claims.claim(executionCtx)
+	// The claim runs under claimCtx, so no claim is issued after stop. A claim
+	// in flight at stop may still commit: a returned job is executed as active
+	// work, a torn one stays running for Recover.
+	j, ok, err := p.claims.claim(claimCtx)
 	switch {
-	case executionCtx.Err() != nil:
-		// A claim may have committed just before the cancel; Recover requeues it.
-		return false, false
+	case claimCtx.Err() != nil && !ok:
+		if err != nil {
+			log.WarnContext(executionCtx, "Claim canceled by stop; a task it claimed stays running for recovery",
+				"error", err)
+		}
+		return false, false, nil
 	case err != nil:
-		log.ErrorContext(claimCtx, "Claim failed, retrying", "error", err, "retry_in", p.cfg.PollInterval)
-		return wait(claimCtx, p.cfg.PollInterval), false
+		*failedClaims++
+		if *failedClaims >= claimAttempts {
+			log.ErrorContext(claimCtx, "Claim failed, giving up", "error", err, "attempts", *failedClaims)
+			return false, false, fmt.Errorf("%w %d times: %w", errClaimsFailing, *failedClaims, err)
+		}
+		log.ErrorContext(claimCtx, "Claim failed, retrying", "error", err,
+			"attempt", *failedClaims, "retry_in", p.cfg.PollInterval)
+		return wait(claimCtx, p.cfg.PollInterval), false, nil
 	case !ok:
-		return wait(claimCtx, p.cfg.PollInterval), false
+		*failedClaims = 0
+		return wait(claimCtx, p.cfg.PollInterval), false, nil
 	}
+	*failedClaims = 0
 	if p.execute(executionCtx, j, log.With("task_id", j.id)) {
-		return false, true
+		return false, true, nil
 	}
-	return true, false
+	return claimCtx.Err() == nil, false, nil
 }
 
 // execute evaluates a claimed task and stores its outcome. Any failure that is
 // not arithmetic leaves the task running; it reports whether ctx interrupted
 // the task.
 func (p *Pool) execute(ctx context.Context, j job, log *slog.Logger) (interrupted bool) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.ErrorContext(ctx, "Task evaluation panicked, left running", "panic", r)
-		}
-	}()
 	log.InfoContext(ctx, "Task claimed")
+	if ctx.Err() != nil {
+		log.WarnContext(ctx, "Task interrupted, left running for recovery", "error", context.Cause(ctx))
+		return true
+	}
 	expr, err := calc.Parse(j.expression)
 	if err != nil {
 		// Expressions are validated on create and update, so this is corrupted

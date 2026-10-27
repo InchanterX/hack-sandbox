@@ -37,6 +37,9 @@ type fakeStore struct {
 	finishErrs []error
 	requeued   int64
 	requeueErr error
+	// onClaim, if set, runs at the start of every claim, as a claim in flight.
+	onClaim    func(ctx context.Context) error
+	claimCtxs  []error
 	claimedAt  []time.Duration
 	finishedAt []time.Duration
 	outcomes   []outcome
@@ -58,10 +61,19 @@ func newFakeStore(expressions ...string) *fakeStore {
 
 func jobID(i int) uuid.UUID { return uuid.UUID{15: byte(i + 1)} }
 
-func (f *fakeStore) claim(context.Context) (job, bool, error) {
+func (f *fakeStore) claim(ctx context.Context) (job, bool, error) {
+	f.mu.Lock()
+	f.claimedAt = append(f.claimedAt, time.Since(f.start))
+	f.claimCtxs = append(f.claimCtxs, ctx.Err())
+	onClaim := f.onClaim
+	f.mu.Unlock()
+	if onClaim != nil {
+		if err := onClaim(ctx); err != nil {
+			return job{}, false, err
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.claimedAt = append(f.claimedAt, time.Since(f.start))
 	if len(f.claimErrs) > 0 {
 		err := f.claimErrs[0]
 		f.claimErrs = f.claimErrs[1:]
@@ -350,4 +362,135 @@ func TestRecover(t *testing.T) {
 	if err := newPool(f, f, f, defaultConfig).Recover(t.Context()); !errors.Is(err, errStore) {
 		t.Errorf("Recover() = %v, want %v", err, errStore)
 	}
+}
+
+func TestRunIssuesNoClaimAfterStop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newFakeStore("1 + 1")
+		// A claim in flight when claims stop is canceled with claimCtx, as
+		// pgx does; the task it may have committed stays running for Recover.
+		f.onClaim = func(ctx context.Context) error {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		cfg := Config{Workers: 2, PollInterval: ms(300)}
+		returned, err := runPool(t, newPool(f, f, f, cfg), ms(500), 0)
+		if err != nil {
+			t.Fatalf("Run() = %v, want nil", err)
+		}
+		if returned != ms(500) {
+			t.Errorf("Run returned at %v, want 0.5s: the stop cancels claims in flight", returned)
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if diff := cmp.Diff([]time.Duration{0, 0}, f.claimedAt); diff != "" {
+			t.Errorf("claim times mismatch (-want +got):\n%s", diff)
+		}
+		if len(f.claimCtxs) != 2 || f.claimCtxs[0] != nil || f.claimCtxs[1] != nil {
+			t.Errorf("claims were issued with canceled contexts %v, want none after stop", f.claimCtxs)
+		}
+		if len(f.outcomes) != 0 || len(f.jobs) != 1 {
+			t.Errorf("outcomes %v and %d queued jobs, want nothing executed", f.outcomes, len(f.jobs))
+		}
+	})
+}
+
+func TestRunExecutesTaskClaimedAsClaimsStop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newFakeStore("2 + 3 * (4 - 1)", "100 - 7")
+		// The first claim commits while claims stop: its task is active work.
+		f.onClaim = func(ctx context.Context) error {
+			<-ctx.Done()
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			f.onClaim = nil
+			return nil
+		}
+		cfg := Config{Workers: 1, OpDelay: ms(700), PollInterval: ms(300)}
+		returned, err := runPool(t, newPool(f, f, f, cfg), ms(500), 0)
+		if err != nil {
+			t.Fatalf("Run() = %v, want nil", err)
+		}
+		if returned != ms(2600) {
+			t.Errorf("Run returned at %v, want 2.6s when the claimed task ends", returned)
+		}
+		claimed, _, outcomes := f.snapshot()
+		if diff := cmp.Diff([]time.Duration{0}, claimed); diff != "" {
+			t.Errorf("claims after stop (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff([]outcome{{ID: jobID(0), Result: 11, At: ms(2600)}}, outcomes); diff != "" {
+			t.Errorf("outcomes mismatch (-want +got):\n%s", diff)
+		}
+	})
+}
+
+func TestRunCountsTaskClaimedAfterExecutionCanceled(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newFakeStore("1 + 1")
+		f.onClaim = func(context.Context) error {
+			time.Sleep(ms(500)) // Claims stop and execution is canceled meanwhile.
+			return nil
+		}
+		cfg := Config{Workers: 1, PollInterval: ms(300)}
+		_, err := runPool(t, newPool(f, f, f, cfg), ms(100), ms(200))
+		if !errors.Is(err, ErrInterrupted) {
+			t.Errorf("Run() = %v, want ErrInterrupted for the claimed task", err)
+		}
+		_, finished, _ := f.snapshot()
+		if len(finished) != 0 {
+			t.Errorf("interrupted task was finished at %v, want it left running", finished)
+		}
+	})
+}
+
+func TestRunGivesUpAfterBoundedClaimRetries(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newFakeStore("1 + 1")
+		for range claimAttempts {
+			f.claimErrs = append(f.claimErrs, errStore)
+		}
+		cfg := Config{Workers: 1, PollInterval: ms(300)}
+		returned, err := runPool(t, newPool(f, f, f, cfg), time.Hour, 0)
+		if !errors.Is(err, errClaimsFailing) || !errors.Is(err, errStore) {
+			t.Errorf("Run() = %v, want errClaimsFailing wrapping %v", err, errStore)
+		}
+		want := time.Duration(claimAttempts-1) * ms(300)
+		if returned != want {
+			t.Errorf("Run returned at %v, want %v after %d attempts", returned, want, claimAttempts)
+		}
+		claimed, _, outcomes := f.snapshot()
+		if len(claimed) != claimAttempts || len(outcomes) != 0 {
+			t.Errorf("%d claims and outcomes %v, want %d failed claims only", len(claimed), outcomes, claimAttempts)
+		}
+	})
+}
+
+func TestRunGivingUpStopsOtherWorkersAfterTheirActiveTask(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newFakeStore("2 + 3 * (4 - 1)", "100 - 7")
+		// Worker A claims the first task; worker B then exhausts its attempts
+		// within 100 ms while A is still evaluating.
+		calls := 0
+		f.onClaim = func(context.Context) error {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			calls++
+			if calls == 1 {
+				return nil
+			}
+			return errStore
+		}
+		cfg := Config{Workers: 2, OpDelay: time.Second, PollInterval: ms(1)}
+		returned, err := runPool(t, newPool(f, f, f, cfg), time.Hour, 0)
+		if !errors.Is(err, errClaimsFailing) {
+			t.Errorf("Run() = %v, want errClaimsFailing", err)
+		}
+		if returned != 3*time.Second {
+			t.Errorf("Run returned at %v, want 3s when the active task ends", returned)
+		}
+		_, _, outcomes := f.snapshot()
+		if diff := cmp.Diff([]outcome{{ID: jobID(0), Result: 11, At: 3 * time.Second}}, outcomes); diff != "" {
+			t.Errorf("outcomes mismatch (-want +got):\n%s", diff)
+		}
+	})
 }
