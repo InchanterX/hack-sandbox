@@ -1,16 +1,43 @@
 // Package queue runs the worker pool that claims queued tasks, evaluates them
 // with calc and stores the result.
 //
-// Scaffold stub (T01): Recover does nothing and Run only waits for claimCtx
-// until T05 implements the pool behind these stable signatures.
+// A worker claims the oldest queued task in one autocommitted statement, so no
+// row lock is held while it evaluates. It pauses OpDelay before every binary
+// operation and stores done or failed with a conditional update. Cancellation
+// and infrastructure failures leave the task running; Recover requeues such
+// tasks at the next start.
 package queue
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"calcqueue/internal/calc"
 )
+
+// Arithmetic failure codes and their exact Russian messages (contracts/schema.sql).
+const (
+	codeDivisionByZero    = "division_by_zero"
+	messageDivisionByZero = "деление на ноль"
+	codeOverflow          = "overflow"
+	messageOverflow       = "переполнение"
+)
+
+// finishAttempts bounds the attempts to store the outcome of one evaluation;
+// after them the task stays running for the next Recover.
+const finishAttempts = 3
+
+// ErrInterrupted reports that canceling the execution context aborted active
+// evaluations; their tasks stay running until the next Recover.
+var ErrInterrupted = errors.New("active tasks interrupted")
 
 // Config configures the worker pool.
 type Config struct {
@@ -22,27 +49,195 @@ type Config struct {
 	PollInterval time.Duration
 }
 
+// claimer takes the next queued task.
+type claimer interface {
+	claim(ctx context.Context) (job, bool, error)
+}
+
+// recorder stores the outcome of a claimed task.
+type recorder interface {
+	complete(ctx context.Context, id uuid.UUID, result float64) error
+	fail(ctx context.Context, id uuid.UUID, code, message string) error
+}
+
+// requeuer resets interrupted tasks.
+type requeuer interface {
+	requeueRunning(ctx context.Context) (int64, error)
+}
+
+var (
+	_ claimer  = (*store)(nil)
+	_ recorder = (*store)(nil)
+	_ requeuer = (*store)(nil)
+)
+
 // Pool is the worker pool over the tasks table.
 type Pool struct {
-	db  *pgxpool.Pool
-	cfg Config
+	claims   claimer
+	results  recorder
+	requeues requeuer
+	cfg      Config
 }
 
 // New returns a pool that is not running yet.
 func New(db *pgxpool.Pool, cfg Config) *Pool {
-	return &Pool{db: db, cfg: cfg}
+	s := &store{pool: db}
+	return newPool(s, s, s, cfg)
+}
+
+func newPool(c claimer, r recorder, q requeuer, cfg Config) *Pool {
+	return &Pool{claims: c, results: r, requeues: q, cfg: cfg}
 }
 
 // Recover turns interrupted running tasks back into queued ones with all
 // execution fields cleared. Call it after migrations, before Run.
-func (p *Pool) Recover(_ context.Context) error {
+func (p *Pool) Recover(ctx context.Context) error {
+	n, err := p.requeues.requeueRunning(ctx)
+	if err != nil {
+		return err
+	}
+	slog.InfoContext(ctx, "Recovered interrupted tasks", "count", n)
 	return nil
 }
 
 // Run starts the workers and blocks until they exit. Canceling claimCtx stops
-// new claims; canceling executionCtx aborts active evaluations, which stay
-// running for the next Recover.
-func (p *Pool) Run(claimCtx, _ context.Context) error {
-	<-claimCtx.Done()
+// new claims; active evaluations continue until they finish or executionCtx is
+// canceled. Interrupted tasks stay running for the next Recover and Run
+// returns an error matching ErrInterrupted. Store errors are logged and
+// retried after PollInterval, so they never stop the workers.
+func (p *Pool) Run(claimCtx, executionCtx context.Context) error {
+	if p.cfg.Workers < 1 {
+		return fmt.Errorf("run queue: workers=%d, want at least 1", p.cfg.Workers)
+	}
+	var interrupted atomic.Int64
+	var wg sync.WaitGroup
+	for i := range p.cfg.Workers {
+		log := slog.With("worker", i+1)
+		wg.Go(func() {
+			for {
+				more, stopped := p.next(claimCtx, executionCtx, log)
+				if stopped {
+					interrupted.Add(1)
+				}
+				if !more {
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+	if n := interrupted.Load(); n > 0 {
+		return fmt.Errorf("run queue: %d tasks left running: %w: %w", n, ErrInterrupted, context.Cause(executionCtx))
+	}
 	return nil
+}
+
+// next claims and executes one task, or waits PollInterval when the queue is
+// empty or the store fails. more is false once the worker must exit;
+// interrupted reports a claimed task left running by executionCtx.
+func (p *Pool) next(claimCtx, executionCtx context.Context, log *slog.Logger) (more, interrupted bool) {
+	if claimCtx.Err() != nil || executionCtx.Err() != nil {
+		return false, false
+	}
+	// The claim runs under executionCtx: a claim already sent when claimCtx is
+	// canceled is not torn mid-statement, its task is executed as active work.
+	j, ok, err := p.claims.claim(executionCtx)
+	switch {
+	case executionCtx.Err() != nil:
+		// A claim may have committed just before the cancel; Recover requeues it.
+		return false, false
+	case err != nil:
+		log.ErrorContext(claimCtx, "Claim failed, retrying", "error", err, "retry_in", p.cfg.PollInterval)
+		return wait(claimCtx, p.cfg.PollInterval), false
+	case !ok:
+		return wait(claimCtx, p.cfg.PollInterval), false
+	}
+	if p.execute(executionCtx, j, log.With("task_id", j.id)) {
+		return false, true
+	}
+	return true, false
+}
+
+// execute evaluates a claimed task and stores its outcome. Any failure that is
+// not arithmetic leaves the task running; it reports whether ctx interrupted
+// the task.
+func (p *Pool) execute(ctx context.Context, j job, log *slog.Logger) (interrupted bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.ErrorContext(ctx, "Task evaluation panicked, left running", "panic", r)
+		}
+	}()
+	log.InfoContext(ctx, "Task claimed")
+	expr, err := calc.Parse(j.expression)
+	if err != nil {
+		// Expressions are validated on create and update, so this is corrupted
+		// data: no failure code fits it and no result may be fabricated.
+		log.ErrorContext(ctx, "Stored expression does not parse, left running", "error", err)
+		return false
+	}
+	result, err := expr.Eval(ctx, p.delay)
+	var code, message string
+	switch {
+	case err == nil:
+	case errors.Is(err, calc.ErrDivisionByZero):
+		code, message = codeDivisionByZero, messageDivisionByZero
+	case errors.Is(err, calc.ErrOverflow):
+		code, message = codeOverflow, messageOverflow
+	case ctx.Err() != nil:
+		log.WarnContext(ctx, "Task interrupted, left running for recovery", "error", err)
+		return true
+	default:
+		log.ErrorContext(ctx, "Task evaluation failed, left running", "error", err)
+		return false
+	}
+	err = p.finish(ctx, func(ctx context.Context) error {
+		if code == "" {
+			return p.results.complete(ctx, j.id, result)
+		}
+		return p.results.fail(ctx, j.id, code, message)
+	})
+	if err != nil {
+		log.ErrorContext(ctx, "Task outcome not stored, left running for recovery", "error", err)
+		return ctx.Err() != nil
+	}
+	log.InfoContext(ctx, "Task finished", "error_code", code)
+	return false
+}
+
+// finish stores an outcome with up to finishAttempts tries, PollInterval apart.
+func (p *Pool) finish(ctx context.Context, record func(context.Context) error) error {
+	var err error
+	for attempt := 1; attempt <= finishAttempts; attempt++ {
+		err = record(ctx)
+		if err == nil || errors.Is(err, errNotRunning) {
+			return err
+		}
+		if attempt == finishAttempts || !wait(ctx, p.cfg.PollInterval) {
+			break
+		}
+	}
+	return err
+}
+
+// delay is the evaluator callback: one OpDelay pause per binary operation.
+func (p *Pool) delay(ctx context.Context) error {
+	if p.cfg.OpDelay <= 0 {
+		return nil
+	}
+	if !wait(ctx, p.cfg.OpDelay) {
+		return context.Cause(ctx) //nolint:wrapcheck // calc expects the context error itself to tell cancellation apart.
+	}
+	return nil
+}
+
+// wait pauses for d and reports whether ctx is still alive afterwards.
+func wait(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
