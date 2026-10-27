@@ -5,6 +5,7 @@ package queue
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,19 +37,15 @@ func started(t *testing.T, p *Pool) (stopClaims, cancelExec context.CancelFunc, 
 	execCtx, cancelExec := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- p.Run(claimCtx, execCtx) }()
+	// Tests may wait explicitly before cleanup. Share the received result so
+	// cleanup still joins the workers without waiting for a second send.
+	wait = sync.OnceValue(func() error { return <-done })
 	t.Cleanup(func() {
 		stopClaims()
 		cancelExec()
-		<-done
+		_ = wait() // Tests that care about the result check it explicitly.
 	})
-	var err error
-	var finished bool
-	return stopClaims, cancelExec, func() error {
-		if !finished {
-			err, finished = <-done, true
-		}
-		return err
-	}
+	return stopClaims, cancelExec, wait
 }
 
 func TestPoolExecutesTasksThroughAllStates(t *testing.T) {
