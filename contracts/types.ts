@@ -35,9 +35,11 @@ export interface AuthSession {
 export interface ExpressionInput {
   expression: string;
 }
-export type ComputationError =
-  | { code: 'division_by_zero'; message: 'деление на ноль' }
-  | { code: 'overflow'; message: 'переполнение' };
+/** Exact code/message pairing is enforced by evaluator tests and DB constraints. */
+export interface ComputationError {
+  code: 'division_by_zero' | 'overflow';
+  message: 'деление на ноль' | 'переполнение';
+}
 export interface Task {
   id: UUID;
   expression: string;

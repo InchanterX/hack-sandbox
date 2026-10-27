@@ -43,7 +43,7 @@ package; services may declare concrete domain records with explicit conversion.
 - `cmd/server/main.go` alone reads env, creates the pool, applies migrations,
   recovers queue, composes the shared route table and owns HTTP/worker shutdown.
   `internal/server/config.go`, `health.go` and their tests are T01-owned, complete
-  code; T05 owns only main and queue. Defaults are fixed in SPEC.md#Runtime.
+  code; T05 owns main, its tests and queue. Defaults are fixed in SPEC.md#Runtime.
 
 Service/store consumer interfaces are package-local and split by capability
 (1–3 methods) rather than one large CRUD interface. Exported constructors above

@@ -77,7 +77,7 @@ DAG последовательный по PLAN: T01 → T02 → T03 → T04 → 
 | Calculator / T02 | `server/internal/calc/**` | Лексер, AST, Parse/Eval; только stdlib |
 | Auth / T03 | `server/internal/auth/**` | Сервис, store, handlers, middleware и тесты; БД/httpjson |
 | Tasks / T04 | `server/internal/tasks/**` | CRUD, принадлежность, транзакции и тесты; calc/auth context/httpjson |
-| Queue + composition / T05 | `server/internal/queue/**`, `server/cmd/server/main.go` | Claim, Eval, recover, остановка и композиция; calc/БД/все handlers |
+| Queue + composition / T05 | `server/internal/queue/**`, `server/cmd/server/main.go`, `server/cmd/server/main_test.go` | Claim, Eval, recover, остановка и композиция; calc/БД/все handlers |
 | Frontend / T06 | `web/src/api/client.ts`, `web/src/auth/**`, `web/src/screens/**`, `web/src/components/**`, `web/src/hooks/**`, `web/src/styles/**` | Единый клиент, сессия, три экрана, компоненты, CSS и тесты; API/schema |
 | Production / T07 | `server/Dockerfile`, `web/Dockerfile`, `web/nginx.conf`, `deploy/base/**`, `deploy/overlays/demo/**` | Завершённые образы и Kustomize; приложение, shared image/secret catalogs |
 | Tooling / T01 | Все пути из Shared-files плюс initial stubs и initial deploy-файлы T07 | Compose/dev/CI, manifests зависимостей, scaffold сборка |
@@ -141,7 +141,7 @@ ErrDivisionByZero, ErrOverflow. Две runtime-ошибки дают failed с �
 ### Auth
 
 Login строго `[a-z0-9_-]{3,32}`, не trim/lowercase. Пароль **8–72 байта UTF-8**,
-не символа (Q5/Q11). bcrypt. Токен: crypto/rand 32 байта, raw base64url (43
+не символов (Q5/Q11). bcrypt. Токен: crypto/rand 32 байта, raw base64url (43
 символа); в БД только SHA-256. Регистрация атомарно создаёт пользователя и сессию;
 конкурирующий unique conflict → 409 login_taken. Каждый успешный login выдаёт
 новую сессию с UTC expires_at; по умолчанию 24 часа. Logout удаляет только текущую

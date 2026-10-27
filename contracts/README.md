@@ -22,8 +22,10 @@ repository root, without nested Docker:
 
 - `npm --prefix tests/contract ci` installs pinned contract check dependencies.
 - `npm --prefix tests/contract test` validates OpenAPI, SQL/migration parity,
-  shared reference types, examples and generated binding drift. Hermetic HTTP
-  contract checks use module handlers with in-memory fakes; stubs need only build
+  shared reference types, examples and generated binding drift. TypeScript strict
+  checks compare all twelve reference schema types bidirectionally with the
+  generated OpenAPI types (including nullable fields and required properties).
+  Hermetic HTTP contract checks use module handlers with in-memory fakes; stubs need only build
   and expose typed entry points at S4. Full behavior is asserted as modules land.
 - `npm --prefix tests/contract run generate` regenerates both Go and web bindings.
   Generation drift checks write to temporary files and compare with committed

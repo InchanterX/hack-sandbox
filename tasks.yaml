@@ -169,6 +169,7 @@ tasks:
     owned_files:
       - server/internal/queue/**
       - server/cmd/server/main.go
+      - server/cmd/server/main_test.go
     acceptance_criteria:
       - 'Postgres tests with two workers claim distinct queued tasks in created_at/id order using SKIP LOCKED, return the current expression, and release row locks before evaluator delays.'
       - 'Worker tests observe queued/running/done or failed with the required timestamps and result/error fields; demo expressions finish with 11/2/93 and division_by_zero retains the exact Russian message.'
