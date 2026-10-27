@@ -141,3 +141,127 @@ func TestPoolStopLeavesInterruptedTaskRecoverable(t *testing.T) {
 		t.Errorf("recovered task result = %v, want 11", got)
 	}
 }
+
+// recordingClaimer records every task the wrapped store claims.
+type recordingClaimer struct {
+	*store
+	mu      sync.Mutex
+	claimed []job
+}
+
+func (r *recordingClaimer) claim(ctx context.Context) (job, bool, error) {
+	j, ok, err := r.store.claim(ctx)
+	if ok {
+		r.mu.Lock()
+		r.claimed = append(r.claimed, j)
+		r.mu.Unlock()
+	}
+	return j, ok, err
+}
+
+func (r *recordingClaimer) jobs() []job {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]job(nil), r.claimed...)
+}
+
+func TestPoolTwoWorkersClaimDistinctTasksInOrder(t *testing.T) {
+	e := newEnv(t)
+	// Same created_at for the first pair: id breaks the tie.
+	first := e.insertID(t, uuid.MustParse("00000000-0000-0000-0000-000000000001"), "1 + 1", base)
+	second := e.insertID(t, uuid.MustParse("ffffffff-0000-0000-0000-000000000000"), "2 + 2", base)
+	third := e.insert(t, "3 + 3", base.Add(time.Second))
+	fourth := e.insert(t, "4 + 4", base.Add(2*time.Second))
+	// An accepted PATCH before the claim: the worker evaluates the new text.
+	if _, err := e.pool.Exec(t.Context(), `UPDATE tasks SET expression = '5 * 5' WHERE id = $1`, second); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := &recordingClaimer{store: e.store}
+	p := newPool(rec, e.store, e.store, Config{Workers: 2, OpDelay: time.Second, PollInterval: 20 * time.Millisecond})
+	stopClaims, _, wait := started(t, p)
+
+	// Both workers are inside their one-second delay at the same time.
+	waitFor(t, 5*time.Second, "both workers to run a task", func() bool { return len(rec.jobs()) == 2 })
+	gotFirst := rec.jobs()
+	if gotFirst[0].id == gotFirst[1].id {
+		t.Fatalf("both workers claimed %s", gotFirst[0].id)
+	}
+	for _, id := range []uuid.UUID{first, second} {
+		if got := e.row(t, id).Status; got != "running" {
+			t.Errorf("oldest task %s is %s while both workers are busy, want running", id, got)
+		}
+		// The claims committed: no row lock is held during the delays.
+		assertUnlocked(t, e.pool, id)
+	}
+	for _, id := range []uuid.UUID{third, fourth} {
+		if got := e.row(t, id).Status; got != "queued" {
+			t.Errorf("newer task %s is %s while both workers are busy, want queued", id, got)
+		}
+	}
+
+	waitFor(t, 10*time.Second, "all tasks to finish", func() bool {
+		return e.row(t, third).Status == "done" && e.row(t, fourth).Status == "done"
+	})
+	stopClaims()
+	if err := wait(); err != nil {
+		t.Errorf("Run() = %v, want nil", err)
+	}
+
+	got := rec.jobs()
+	ids := make(map[uuid.UUID]string, len(got))
+	for _, j := range got {
+		if _, dup := ids[j.id]; dup {
+			t.Errorf("task %s was claimed twice", j.id)
+		}
+		ids[j.id] = j.expression
+	}
+	want := map[uuid.UUID]string{first: "1 + 1", second: "5 * 5", third: "3 + 3", fourth: "4 + 4"}
+	if diff := cmp.Diff(want, ids); diff != "" {
+		t.Errorf("claimed tasks and expressions mismatch (-want +got):\n%s", diff)
+	}
+	// FIFO across workers: the oldest pair first, in either worker order.
+	if pair := map[uuid.UUID]bool{gotFirst[0].id: true, gotFirst[1].id: true}; !pair[first] || !pair[second] {
+		t.Errorf("first claims %v, want the two oldest tasks %s and %s", gotFirst, first, second)
+	}
+	if r := e.row(t, second); r.Result == nil || *r.Result != 25 {
+		t.Errorf("patched task result = %v, want 25 from the current expression", r.Result)
+	}
+}
+
+func TestStoreParallelClaimsNeverShareATask(t *testing.T) {
+	e := newEnv(t)
+	const tasks = 40
+	for i := range tasks {
+		e.insert(t, "1 + 1", base.Add(time.Duration(i)*time.Millisecond))
+	}
+	var mu sync.Mutex
+	seen := map[uuid.UUID]int{}
+	var wg sync.WaitGroup
+	for worker := range 2 {
+		wg.Go(func() {
+			for {
+				j, ok, err := e.store.claim(t.Context())
+				if err != nil {
+					t.Errorf("worker %d: claim: %v", worker, err)
+					return
+				}
+				if !ok {
+					return
+				}
+				mu.Lock()
+				seen[j.id]++
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+	if len(seen) != tasks {
+		t.Errorf("claimed %d distinct tasks, want %d", len(seen), tasks)
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Errorf("task %s claimed %d times, want once", id, n)
+		}
+	}
+}
