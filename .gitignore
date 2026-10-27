@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+/server/server
+/server/bin/
+.DS_Store
+HANDOFF.md
+.orchestra/

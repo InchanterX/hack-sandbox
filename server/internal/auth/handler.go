@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 
 	"calcqueue/internal/httpjson"
 	"calcqueue/internal/openapi"
@@ -27,13 +28,14 @@ type User struct {
 
 // Handler serves the authentication endpoints and the Bearer middleware.
 type Handler struct {
-	pool *pgxpool.Pool
-	ttl  time.Duration
+	pool       *pgxpool.Pool
+	ttl        time.Duration
+	bcryptCost int
 }
 
 // NewHandler wires the auth service and its SQL store; ttl is the session lifetime.
 func NewHandler(pool *pgxpool.Pool, ttl time.Duration) *Handler {
-	return &Handler{pool: pool, ttl: ttl}
+	return &Handler{pool: pool, ttl: ttl, bcryptCost: bcrypt.DefaultCost}
 }
 
 // Register handles POST /api/auth/register.

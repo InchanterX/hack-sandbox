@@ -38,7 +38,7 @@ func main() {
 func run() error {
 	cfg, err := server.LoadConfig(os.Getenv)
 	if err != nil {
-		return err
+		return fmt.Errorf("load config: %w", err)
 	}
 	slog.Info("Starting server", "config", cfg)
 
