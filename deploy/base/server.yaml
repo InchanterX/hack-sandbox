@@ -58,6 +58,7 @@ spec:
             httpGet: {path: /api/healthz, port: http}
             periodSeconds: 5
             timeoutSeconds: 3
+            failureThreshold: 6
           livenessProbe:
             httpGet: {path: /api/healthz, port: http}
             periodSeconds: 10
