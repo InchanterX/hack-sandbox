@@ -1,4 +1,10 @@
 // Command server runs the Calc Queue HTTP API and its queue workers.
+//
+// Startup order: config, database connect (retried for up to 60 s),
+// migrations, recovery of interrupted tasks, then HTTP and workers. On SIGTERM
+// it stops new claims and HTTP intake at once, gives active work up to 10 s,
+// then cancels execution; interrupted tasks stay running and are recovered by
+// the next start. The whole stop stays well inside the 30 s pod grace.
 package main
 
 import (
@@ -6,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,37 +29,82 @@ import (
 )
 
 const (
-	connectTimeout  = 60 * time.Second
-	shutdownTimeout = 10 * time.Second
+	// connectTimeout bounds the wait for the database at startup.
+	connectTimeout = 60 * time.Second
+	// connectRetry is the pause between failed startup pings.
+	connectRetry = time.Second
+	// shutdownGrace is the time active HTTP requests and evaluations get after
+	// a stop signal before execution is canceled.
+	shutdownGrace = 10 * time.Second
+	// stopTimeout bounds the wait for workers after execution is canceled.
+	stopTimeout = 5 * time.Second
+	// readHeaderTimeout bounds slow request headers.
+	readHeaderTimeout = 5 * time.Second
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	slog.SetDefault(logger)
-	if err := run(); err != nil {
-		logger.Error("Server stopped", "error", err)
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	ctx, stop := notifyContext()
+	err := run(ctx, os.Getenv)
+	stop()
+	if err != nil {
+		slog.Error("Server stopped", "error", err)
 		os.Exit(1)
 	}
+	slog.Info("Server stopped")
 }
 
-func run() error {
-	cfg, err := server.LoadConfig(os.Getenv)
+// notifyContext returns a context canceled by SIGINT or SIGTERM.
+func notifyContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+}
+
+// run reads the configuration through getenv, starts the server and blocks
+// until ctx is canceled and the shutdown has finished.
+func run(ctx context.Context, getenv func(string) string) error {
+	cfg, err := server.LoadConfig(getenv)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	slog.Info("Starting server", "config", cfg)
+	logConfig(ctx, cfg)
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	pool, err := connect(ctx, cfg.DatabaseURL)
+	a, err := start(ctx, cfg, connectTimeout)
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
+	defer a.close()
 
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", cfg.Addr())
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", cfg.Addr(), err)
+	}
+	return a.serve(ctx, ln, shutdownGrace)
+}
+
+// logConfig logs the configuration except DatabaseURL, which carries the password.
+func logConfig(ctx context.Context, cfg server.Config) {
+	slog.InfoContext(ctx, "Starting server", "port", cfg.Port, "workers", cfg.Workers,
+		"op_delay", cfg.OpDelay, "poll_interval", cfg.PollInterval, "session_ttl", cfg.SessionTTL)
+}
+
+// app is the started server: migrated, recovered and ready to serve.
+type app struct {
+	pool    *pgxpool.Pool
+	workers *queue.Pool
+	handler http.Handler
+}
+
+// start connects to the database within connectBudget, applies migrations and
+// then recovers interrupted tasks. No worker runs before it returns.
+func start(ctx context.Context, cfg server.Config, connectBudget time.Duration) (*app, error) {
+	pool, err := connect(ctx, cfg.DatabaseURL, connectBudget)
+	if err != nil {
+		return nil, err
+	}
 	if err := migrations.Apply(ctx, pool); err != nil {
-		return fmt.Errorf("migrate: %w", err)
+		pool.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	workers := queue.New(pool, queue.Config{
 		Workers:      cfg.Workers,
@@ -60,29 +112,40 @@ func run() error {
 		PollInterval: cfg.PollInterval,
 	})
 	if err := workers.Recover(ctx); err != nil {
-		return fmt.Errorf("recover tasks: %w", err)
+		pool.Close()
+		return nil, fmt.Errorf("recover tasks: %w", err)
 	}
+	return &app{
+		pool:    pool,
+		workers: workers,
+		handler: server.NewHandler(pool, auth.NewHandler(pool, cfg.SessionTTL), tasks.NewHandler(pool)),
+	}, nil
+}
 
-	srv := &http.Server{
-		Addr:              cfg.Addr(),
-		Handler:           server.NewHandler(pool, auth.NewHandler(pool, cfg.SessionTTL), tasks.NewHandler(pool)),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+// close releases the database pool.
+func (a *app) close() { a.pool.Close() }
+
+// serve runs HTTP on ln and the workers until ctx is canceled, HTTP fails or
+// the workers give up on a failing store. Then it stops
+// new claims and HTTP intake, waits up to grace for active requests and
+// evaluations, cancels execution and waits up to stopTimeout for the workers.
+// Tasks interrupted this way stay running for the next start; that is a
+// warning, not a failed stop.
+func (a *app) serve(ctx context.Context, ln net.Listener, grace time.Duration) error {
+	srv := &http.Server{Handler: a.handler, ReadHeaderTimeout: readHeaderTimeout}
 
 	claimCtx, stopClaims := context.WithCancel(ctx)
 	defer stopClaims()
-	execCtx, cancelExec := context.WithCancel(context.Background())
+	// Execution outlives ctx by up to grace; it is canceled explicitly.
+	execCtx, cancelExec := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelExec()
 	workersDone := make(chan error, 1)
-	go func() { workersDone <- workers.Run(claimCtx, execCtx) }()
+	go func() { workersDone <- a.workers.Run(claimCtx, execCtx) }()
 
 	serveErr := make(chan error, 1)
 	go func() {
-		slog.Info("Listening", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			serveErr <- fmt.Errorf("serve http: %w", err)
-		}
-		close(serveErr)
+		slog.InfoContext(ctx, "Listening", "addr", ln.Addr().String())
+		serveErr <- srv.Serve(ln)
 	}()
 
 	select {
@@ -90,47 +153,91 @@ func run() error {
 	case err := <-serveErr:
 		stopClaims()
 		cancelExec()
-		return errors.Join(err, <-workersDone)
+		return errors.Join(fmt.Errorf("serve http: %w", err), waitWorkers(workersDone))
+	case err := <-workersDone:
+		// Run returns before a stop only when the store keeps failing; the
+		// restarted process recovers. Requests in flight still get the grace.
+		slog.ErrorContext(ctx, "Queue workers stopped, shutting down", "error", err)
+		graceCtx, cancelGrace := context.WithTimeout(context.WithoutCancel(ctx), grace)
+		defer cancelGrace()
+		return errors.Join(fmt.Errorf("run queue workers: %w", err), shutdownHTTP(graceCtx, srv))
 	}
-	slog.Info("Shutting down")
+	slog.InfoContext(ctx, "Shutting down", "grace", grace)
 	stopClaims()
 
-	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
-	defer cancelShutdown()
-	var errs []error
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		errs = append(errs, fmt.Errorf("shutdown http: %w", err))
-	}
+	graceCtx, cancelGrace := context.WithTimeout(context.WithoutCancel(ctx), grace)
+	defer cancelGrace()
+	errs := []error{shutdownHTTP(graceCtx, srv)}
 	select {
 	case err := <-workersDone:
-		errs = append(errs, err)
-	case <-shutdownCtx.Done():
+		errs = append(errs, workerError(err))
+	case <-graceCtx.Done():
+		slog.WarnContext(ctx, "Shutdown grace expired, canceling active tasks", "grace", grace)
 		cancelExec()
-		errs = append(errs, <-workersDone)
+		errs = append(errs, waitWorkers(workersDone))
 	}
 	return errors.Join(errs...)
 }
 
-// connect opens the pool and retries the first ping for up to connectTimeout.
-func connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+// shutdownHTTP stops intake and waits for active requests until ctx ends, then
+// closes the remaining connections.
+func shutdownHTTP(ctx context.Context, srv *http.Server) error {
+	err := srv.Shutdown(ctx)
+	if err == nil {
+		return nil
+	}
+	err = fmt.Errorf("shutdown http: %w", err)
+	if cerr := srv.Close(); cerr != nil {
+		err = errors.Join(err, fmt.Errorf("close http: %w", cerr))
+	}
+	return err
+}
+
+// waitWorkers waits up to stopTimeout for the result of queue.Pool.Run.
+func waitWorkers(done <-chan error) error {
+	timer := time.NewTimer(stopTimeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return workerError(err)
+	case <-timer.C:
+		return fmt.Errorf("queue workers did not stop within %v", stopTimeout)
+	}
+}
+
+// workerError maps the result of queue.Pool.Run to the stop error: tasks
+// interrupted by the shutdown are expected and recovered at the next start.
+func workerError(err error) error {
+	if errors.Is(err, queue.ErrInterrupted) {
+		slog.Warn("Active tasks left running for recovery at the next start", "error", err)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("run queue workers: %w", err)
+	}
+	return nil
+}
+
+// connect opens the pool and retries the first ping for up to budget.
+func connect(ctx context.Context, dsn string, budget time.Duration) (*pgxpool.Pool, error) {
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database pool: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, connectTimeout)
-	defer cancel()
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(connectRetry)
 	defer ticker.Stop()
 	for {
 		err := pool.Ping(ctx)
 		if err == nil {
 			return pool, nil
 		}
-		slog.Warn("Database not ready", "error", err)
+		slog.WarnContext(ctx, "Database not ready", "error", err, "retry_in", connectRetry)
 		select {
 		case <-ctx.Done():
 			pool.Close()
-			return nil, fmt.Errorf("connect to database: %w", err)
+			return nil, fmt.Errorf("connect to database within %v: %w", budget, err)
 		case <-ticker.C:
 		}
 	}
