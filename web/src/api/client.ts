@@ -8,12 +8,17 @@ let authToken: string | null = null;
 /** Bumped on every token change; responses to requests of an older session are dropped. */
 let sessionGeneration = 0;
 const requestGeneration = new WeakMap<Request, number>();
+const pendingRequests = new Map<Request, AbortController>();
 let onUnauthorized: UnauthorizedHandler | null = null;
 
 /** Sets the Bearer token sent with every request; null removes the header. */
 export function setAuthToken(token: string | null): void {
   if (token !== authToken) {
     sessionGeneration += 1;
+    for (const controller of pendingRequests.values()) {
+      controller.abort();
+    }
+    pendingRequests.clear();
   }
   authToken = token;
 }
@@ -27,13 +32,19 @@ const publicPaths = new Set(['/api/auth/login', '/api/auth/register']);
 
 const authMiddleware: Middleware = {
   onRequest({ request }) {
-    requestGeneration.set(request, sessionGeneration);
     if (authToken) {
       request.headers.set('Authorization', `Bearer ${authToken}`);
     }
-    return request;
+    const controller = new AbortController();
+    const scopedRequest = new Request(request, {
+      signal: AbortSignal.any([request.signal, controller.signal]),
+    });
+    pendingRequests.set(scopedRequest, controller);
+    requestGeneration.set(scopedRequest, sessionGeneration);
+    return scopedRequest;
   },
   onResponse({ request, response }) {
+    pendingRequests.delete(request);
     if (requestGeneration.get(request) !== sessionGeneration) {
       throw new DOMException('the session changed while the request was in flight', 'AbortError');
     }
@@ -41,6 +52,9 @@ const authMiddleware: Middleware = {
       onUnauthorized?.();
     }
     return response;
+  },
+  onError({ request }) {
+    pendingRequests.delete(request);
   },
 };
 

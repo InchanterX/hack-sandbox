@@ -8,7 +8,7 @@ export type AuthSession = components['schemas']['AuthSession'];
 export interface AuthState {
   user: User | null;
   isLoading: boolean;
-  signIn: (session: AuthSession) => void;
+  signIn: (session: AuthSession) => Promise<void>;
   /** Calls the logout API; the local session is cleared even if the request fails. */
   signOut: () => Promise<void>;
 }

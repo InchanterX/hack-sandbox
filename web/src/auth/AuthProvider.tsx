@@ -16,44 +16,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(() => loadToken() !== null);
-  const userIdRef = useRef<string | null>(null);
+  const generation = useRef(0);
+  const cleanup = useRef<Promise<void>>(Promise.resolve());
 
-  const dropUserData = useCallback(() => {
-    void queryClient.cancelQueries();
-    queryClient.removeQueries();
-  }, [queryClient]);
-
-  const clearSession = useCallback(() => {
+  const replaceSession = useCallback(async (session: AuthSession | null) => {
+    const current = ++generation.current;
+    // Hide private UI and reject old HTTP responses before starting asynchronous cleanup.
     setAuthToken(null);
     saveToken(null);
-    userIdRef.current = null;
-    dropUserData();
     setUser(null);
-  }, [dropUserData]);
-
-  const signIn = useCallback(
-    (session: AuthSession) => {
-      if (userIdRef.current !== session.user.id) {
-        dropUserData();
-      }
-      userIdRef.current = session.user.id;
+    setIsLoading(true);
+    const canceled = queryClient.cancelQueries();
+    // An overlapping transition must also wait for earlier cancellation to settle.
+    cleanup.current = Promise.all([cleanup.current, canceled]).then(() => undefined);
+    await cleanup.current;
+    if (current !== generation.current) {
+      return;
+    }
+    queryClient.removeQueries();
+    queryClient.getMutationCache().clear();
+    if (session) {
       setAuthToken(session.token);
       saveToken(session.token);
       setUser(session.user);
-      setIsLoading(false);
-    },
-    [dropUserData],
-  );
+    }
+    setIsLoading(false);
+  }, [queryClient]);
+
+  const clearSession = useCallback(() => {
+    void replaceSession(null);
+  }, [replaceSession]);
 
   const signOut = useCallback(async () => {
+    const current = generation.current;
     try {
       await client.POST('/api/auth/logout');
     } catch {
       // network failure: the local session is cleared anyway
     } finally {
-      clearSession();
+      // A delayed logout response must not sign out a newer account.
+      if (current === generation.current) {
+        await replaceSession(null);
+      }
     }
-  }, [clearSession]);
+  }, [replaceSession]);
 
   useEffect(() => {
     setUnauthorizedHandler(clearSession);
@@ -66,15 +72,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     let active = true;
+    const current = generation.current;
+    const controller = new AbortController();
     setAuthToken(token);
     client
-      .GET('/api/me')
+      .GET('/api/me', { signal: controller.signal })
       .then(({ data, response }) => {
-        if (!active) {
+        if (!active || current !== generation.current) {
           return;
         }
         if (data) {
-          userIdRef.current = data.id;
           setUser(data);
         } else if (response.status === 401) {
           clearSession();
@@ -82,18 +89,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => undefined)
       .finally(() => {
-        if (active) {
+        if (active && current === generation.current) {
           setIsLoading(false);
         }
       });
     return () => {
       active = false;
+      controller.abort();
     };
   }, [clearSession]);
 
   const value = useMemo<AuthState>(
-    () => ({ user, isLoading, signIn, signOut }),
-    [user, isLoading, signIn, signOut],
+    () => ({ user, isLoading, signIn: replaceSession, signOut }),
+    [user, isLoading, replaceSession, signOut],
   );
 
   const provider = <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

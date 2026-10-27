@@ -5,7 +5,8 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { client, setAuthToken, setUnauthorizedHandler } from '../api/client';
-import { apiError, apiResponse, alice, bob, renderApp, sessionOf } from '../hooks/testHelpers';
+import { apiError, apiResponse, alice, bob, makeTask, renderApp, sessionOf } from '../hooks/testHelpers';
+import { tasksKey, useTasks } from '../hooks/useTasks';
 import { AuthProvider } from './AuthProvider';
 import { loadToken, saveToken } from './session';
 import { useAuth } from './useAuth';
@@ -27,6 +28,32 @@ function handlerRegisteredLast(): () => void {
 beforeEach(() => {
   vi.clearAllMocks();
 });
+
+function AccountTasks({ userId }: { userId: string }) {
+  const tasks = useTasks(userId);
+  return <div>{tasks.data?.map((task) => <p key={task.id}>{task.expression}</p>)}</div>;
+}
+
+function SessionProbe() {
+  const { user, isLoading, signIn, signOut } = useAuth();
+  return (
+    <>
+      <output data-testid="who">{isLoading ? 'loading' : user?.login ?? 'guest'}</output>
+      <button onClick={() => void signIn(sessionOf(bob, 'bob-token'))}>switch</button>
+      <button onClick={() => void signOut()}>logout</button>
+      {user && <AccountTasks key={user.id} userId={user.id} />}
+    </>
+  );
+}
+
+function renderSession(queryClient = new QueryClient()) {
+  render(
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider><SessionProbe /></AuthProvider>
+    </QueryClientProvider>,
+  );
+  return queryClient;
+}
 
 describe('session bootstrap', () => {
   it('shows loading, validates the stored token with /api/me and opens the tasks', async () => {
@@ -114,6 +141,93 @@ describe('session lifecycle', () => {
     await userEvent.click(screen.getByText('switch'));
     expect(screen.getByTestId('who')).toHaveTextContent('bob');
     expect(queryClient.getQueryData(['tasks', alice.id])).toBeUndefined();
+    expect(loadToken()).toBe('bob-token');
+  });
+
+  it.each(['401', 'logout', 'account change'])(
+    'awaits cancellation before removing cache on %s, ignoring a delayed old query', async (reason) => {
+      saveToken('alice-token');
+      let oldSignal: AbortSignal | undefined;
+      let finishOld: (value: unknown) => void = () => undefined;
+      let listCalls = 0;
+      get.mockImplementation((path: string, options?: { signal: AbortSignal }) => {
+        if (path === '/api/me') return Promise.resolve(apiResponse(200, alice));
+        listCalls += 1;
+        if (listCalls === 1) {
+          oldSignal = options?.signal;
+          // Deliberately ignore abort at the transport: QueryClient must discard this result.
+          return new Promise((resolve) => { finishOld = resolve; });
+        }
+        return Promise.resolve(apiResponse(200, { items: [makeTask({ expression: 'bob task' })] }));
+      });
+      post.mockResolvedValue(apiResponse(204));
+      const queryClient = new QueryClient();
+      queryClient.setQueryData(tasksKey(alice.id), [makeTask({ expression: 'cached alice task' })]);
+      const cancelQueries = queryClient.cancelQueries.bind(queryClient);
+      let releaseCancellation: () => void = () => undefined;
+      const cancellationSettled = new Promise<void>((resolve) => { releaseCancellation = resolve; });
+      vi.spyOn(queryClient, 'cancelQueries').mockImplementation(async (...args) => {
+        await cancelQueries(...args);
+        await cancellationSettled;
+      });
+      const remove = vi.spyOn(queryClient, 'removeQueries');
+      renderSession(queryClient);
+      await screen.findByText('cached alice task');
+      await waitFor(() => expect(oldSignal).toBeDefined());
+
+      if (reason === '401') {
+        act(() => handlerRegisteredLast()());
+      } else {
+        await userEvent.click(screen.getByText(reason === 'logout' ? 'logout' : 'switch'));
+      }
+      await waitFor(() => expect(oldSignal?.aborted).toBe(true));
+      expect(remove).not.toHaveBeenCalled();
+      expect(screen.getByTestId('who')).toHaveTextContent('loading');
+      expect(screen.queryByText('cached alice task')).toBeNull();
+      expect(listCalls).toBe(1);
+
+      await act(async () => releaseCancellation());
+      await waitFor(() => expect(screen.getByTestId('who')).toHaveTextContent(
+        reason === 'account change' ? 'bob' : 'guest',
+      ));
+      expect(queryClient.getQueryData(tasksKey(alice.id))).toBeUndefined();
+      await act(async () => finishOld(apiResponse(200, { items: [makeTask({ expression: 'late alice task' })] })));
+      expect(screen.queryByText('late alice task')).toBeNull();
+      expect(queryClient.getQueryData(tasksKey(alice.id))).toBeUndefined();
+      if (reason === 'account change') {
+        expect(await screen.findByText('bob task')).toBeInTheDocument();
+        expect(queryClient.getQueryData(tasksKey(bob.id))).toEqual([makeTask({ expression: 'bob task' })]);
+      }
+    },
+  );
+
+  it('does not restore a delayed /api/me after signing in to a different account', async () => {
+    saveToken('alice-token');
+    let finishBootstrap: (value: unknown) => void = () => undefined;
+    get.mockImplementation((path: string) => path === '/api/me'
+      ? new Promise((resolve) => { finishBootstrap = resolve; })
+      : Promise.resolve(apiResponse(200, { items: [] })));
+    renderSession();
+    await userEvent.click(screen.getByText('switch'));
+    await waitFor(() => expect(screen.getByTestId('who')).toHaveTextContent('bob'));
+    await act(async () => finishBootstrap(apiResponse(200, alice)));
+    expect(screen.getByTestId('who')).toHaveTextContent('bob');
+    expect(loadToken()).toBe('bob-token');
+  });
+
+  it('does not clear a new account when an old logout finishes late', async () => {
+    saveToken('alice-token');
+    get.mockImplementation((path: string) => Promise.resolve(path === '/api/me'
+      ? apiResponse(200, alice) : apiResponse(200, { items: [] })));
+    let finishLogout: (value: unknown) => void = () => undefined;
+    post.mockImplementationOnce(() => new Promise((resolve) => { finishLogout = resolve; }));
+    renderSession();
+    await waitFor(() => expect(screen.getByTestId('who')).toHaveTextContent('alice'));
+    await userEvent.click(screen.getByText('logout'));
+    await userEvent.click(screen.getByText('switch'));
+    await waitFor(() => expect(screen.getByTestId('who')).toHaveTextContent('bob'));
+    await act(async () => finishLogout(apiResponse(204)));
+    expect(screen.getByTestId('who')).toHaveTextContent('bob');
     expect(loadToken()).toBe('bob-token');
   });
 });

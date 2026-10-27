@@ -15,7 +15,7 @@ export function Login() {
 
   const submit = async (login: string, password: string) => {
     const session = unwrap(await client.POST('/api/auth/login', { body: { login, password } }));
-    signIn(session);
+    await signIn(session);
     void navigate('/', { replace: true });
   };
 
