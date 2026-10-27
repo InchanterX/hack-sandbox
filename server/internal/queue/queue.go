@@ -162,8 +162,10 @@ func (p *Pool) Run(claimCtx, executionCtx context.Context) error {
 func (p *Pool) next(claimCtx, executionCtx context.Context, log *slog.Logger, failedClaims *int) (
 	more, interrupted bool, err error,
 ) {
-	if claimCtx.Err() != nil {
-		return false, false, nil
+	select {
+	case <-claimCtx.Done():
+		return false, false, nil // Stopped: not an error.
+	default:
 	}
 	// The claim runs under claimCtx, so no claim is issued after stop. A claim
 	// in flight at stop may still commit: a returned job is executed as active
