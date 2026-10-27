@@ -1,3 +1,4 @@
+import type { QueryClient } from '@tanstack/react-query';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -5,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { client } from '../../api/client';
 import { saveToken } from '../../auth/session';
 import { alice, apiError, apiResponse, makeTask, renderApp } from '../../hooks/testHelpers';
-import type { Task } from '../../hooks/useTasks';
+import { tasksKey, type Task } from '../../hooks/useTasks';
 
 vi.mock('../../api/client', () => ({
   client: { GET: vi.fn(), POST: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() },
@@ -38,6 +39,12 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
 });
+
+const taskKeys = (queryClient: QueryClient) =>
+  queryClient
+    .getQueryCache()
+    .findAll({ queryKey: ['tasks'] })
+    .map((query) => query.queryKey);
 
 const buttonsOf = (row: HTMLElement) => within(row).queryAllByRole('button').map((b) => b.textContent);
 
@@ -264,13 +271,15 @@ describe('Polling', () => {
   it('refetches every 1000 ms without replacing a typed edit or moving focus', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: false });
     tasks = [makeTask({ expression: '1 + 1' })];
-    renderApp('/');
+    const { queryClient } = renderApp('/');
     for (let i = 0; i < 10; i += 1) {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1);
       });
     }
     expect(screen.getByRole('button', { name: 'Изменить' })).toBeInTheDocument();
+    expect(taskKeys(queryClient)).toEqual([tasksKey(alice.id)]);
+    expect(tasksKey(alice.id)).toEqual(['tasks', alice.id]);
     fireEvent.click(screen.getByRole('button', { name: 'Изменить' }));
     const input = screen.getByRole('textbox', { name: 'Выражение задачи' });
     input.focus();
@@ -292,6 +301,42 @@ describe('Polling', () => {
     expect(input).toHaveFocus();
     expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Отмена' })).toBeInTheDocument();
+  });
+
+  it('invalidates the user-keyed list after a mutation without waiting for the interval', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+    tasks = [makeTask({ id: 'old', expression: '1 + 1', status: 'done', result: 2 })];
+    const { queryClient } = renderApp('/');
+    for (let i = 0; i < 10; i += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+    }
+    expect(screen.getByText('1 + 1')).toBeInTheDocument();
+    const key = tasksKey(alice.id);
+    expect(taskKeys(queryClient)).toEqual([key]);
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    const listCalls = () => get.mock.calls.filter(([p]) => p === '/api/tasks').length;
+    const before = listCalls();
+    const fetchedAt = queryClient.getQueryState(key)?.dataUpdatedAt;
+
+    const created = makeTask({ id: 'new', expression: '2 * 3' });
+    post.mockResolvedValueOnce(apiResponse(201, created));
+    tasks = [created, ...tasks];
+    fireEvent.change(screen.getByLabelText('Выражение'), { target: { value: '2 * 3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Вычислить' }));
+    // Far less than the 1000 ms interval: only the invalidation can refetch now
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+
+    expect(post).toHaveBeenCalledWith('/api/tasks', { body: { expression: '2 * 3' } });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['tasks'] });
+    expect(listCalls()).toBe(before + 1);
+    expect(queryClient.getQueryState(key)?.dataUpdatedAt).toBeGreaterThan(fetchedAt ?? Infinity);
+    expect(queryClient.getQueryData(key)).toEqual(tasks);
+    expect(screen.getByText('2 * 3')).toBeInTheDocument();
+    expect(taskKeys(queryClient)).toEqual([key]);
   });
 });
 
