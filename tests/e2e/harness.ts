@@ -3,10 +3,10 @@
 // small typed HTTP client plus bounded polling. Server output is kept and
 // printed when a step fails.
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { access, constants, mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
@@ -34,12 +34,19 @@ export class App {
 
   /** Builds the server and the schema helper, creates the schema. */
   async setup(): Promise<void> {
+    const go = await findGo();
     this.binDir = await mkdtemp(join(tmpdir(), 'calc-e2e-'));
-    await run('go', ['build', '-o', join(this.binDir, 'server'), './cmd/server'], { cwd: serverDir });
-    await run('go', ['build', '-o', join(this.binDir, 'e2eschema'), './internal/testdb/e2eschema'], {
+    await run(go, ['build', '-o', join(this.binDir, 'server'), './cmd/server'], { cwd: serverDir });
+    await run(go, ['build', '-o', join(this.binDir, 'e2eschema'), './internal/testdb/e2eschema'], {
       cwd: serverDir,
     });
-    const { stdout } = await run(join(this.binDir, 'e2eschema'), ['create']);
+    const { stdout } = await run(join(this.binDir, 'e2eschema'), ['create']).catch((err: unknown) => {
+      throw new Error(
+        'cannot create the e2e schema: the compose db must be reachable through DATABASE_URL or ' +
+          'DB_HOST/DB_NAME/DB_USER/POSTGRES_PASSWORD (run the e2e in compose service dev)',
+        { cause: err },
+      );
+    });
     const created = JSON.parse(stdout) as { schema: string; database_url: string };
     this.schema = created.schema;
     this.databaseUrl = created.database_url;
@@ -121,6 +128,32 @@ export async function waitFor(what: string, timeoutMs: number, cond: () => Promi
     if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs} ms waiting for ${what}`);
     await new Promise((r) => setTimeout(r, 50));
   }
+}
+
+/**
+ * Finds the go tool. A login shell (sh -l) resets PATH and drops
+ * /usr/local/go/bin of the golang image, so known install places are tried
+ * after GO and PATH.
+ */
+async function findGo(): Promise<string> {
+  const candidates = [
+    process.env.GO,
+    ...(process.env.PATH ?? '').split(delimiter).filter(Boolean).map((dir) => join(dir, 'go')),
+    process.env.GOROOT && join(process.env.GOROOT, 'bin', 'go'),
+    '/usr/local/go/bin/go',
+    join(homedir(), 'sdk', 'go', 'bin', 'go'),
+    join(homedir(), 'go', 'bin', 'go'),
+  ];
+  for (const c of candidates) {
+    if (!c) continue;
+    try {
+      await access(c, constants.X_OK);
+      return c;
+    } catch {
+      // try the next one
+    }
+  }
+  throw new Error('go not found: set GO or PATH (the e2e builds the server; compose service dev has Go)');
 }
 
 function freePort(): Promise<number> {

@@ -17,5 +17,7 @@ printed when a step fails.
 
 A separate `load_*` user keeps both workers busy with 199-character tasks
 (99 operations, about 5 s) whenever a step needs the queue to be visible, so
-alice's list matches the demo exactly. Needs `go` on PATH (it is in `dev`).
+alice's list matches the demo exactly. Needs Go: `GO`, `PATH`, `GOROOT/bin`
+or `/usr/local/go/bin` (the latter also works under `sh -l`, which resets PATH),
+and the compose db; both are in `dev`.
 `package.json` and `package-lock.json` are scaffold files (T01).
