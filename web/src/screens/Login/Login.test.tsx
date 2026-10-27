@@ -59,6 +59,7 @@ describe('Login', () => {
     expect(screen.getByRole('button', { name: 'Войти' })).toBeDisabled();
     resolve(apiError(422, 'validation_error', 'проверьте поля формы'));
     expect(await screen.findByText('проверьте поля формы')).toBeInTheDocument();
+    expect(screen.getByLabelText('Логин')).toHaveAccessibleDescription('проверьте поля формы');
     expect(screen.getByRole('button', { name: 'Войти' })).toBeEnabled();
   });
 

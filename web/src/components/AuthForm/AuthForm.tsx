@@ -7,6 +7,8 @@ export const PASSWORD_MIN_BYTES = 8;
 export const PASSWORD_MAX_BYTES = 72;
 const PASSWORD_BYTES_TEXT = 'Пароль должен занимать от 8 до 72 байт (кириллица — 2 байта на символ)';
 const LOGIN_REQUIRED_TEXT = 'Введите логин';
+/** Login format of the API Credentials schema. */
+const LOGIN_PATTERN = /^[a-z0-9_-]{3,32}$/;
 
 /** UTF-8 byte length of a password (bcrypt limit is in bytes, not characters). */
 export function passwordBytes(password: string): number {
@@ -30,13 +32,19 @@ interface Errors {
 }
 const NO_ERRORS: Errors = { login: null, password: null, form: null };
 
-function serverErrors(cause: unknown): Errors {
+/**
+ * The 422 envelope does not name the field, so it is placed at the field that breaks
+ * the Credentials schema: an invalid login first, otherwise the password.
+ */
+function serverErrors(cause: unknown, login: string): Errors {
   if (cause instanceof ApiRequestError) {
     if (cause.status === 409) {
       return { ...NO_ERRORS, login: cause.message };
     }
     if (cause.status === 422) {
-      return { ...NO_ERRORS, password: cause.message };
+      return LOGIN_PATTERN.test(login)
+        ? { ...NO_ERRORS, password: cause.message }
+        : { ...NO_ERRORS, login: cause.message };
     }
   }
   return { ...NO_ERRORS, form: errorText(cause) };
@@ -75,7 +83,7 @@ export function AuthForm({ heading, submitLabel, checkPasswordBytes, newPassword
     try {
       await onSubmit(login, password);
     } catch (cause) {
-      setErrors(serverErrors(cause));
+      setErrors(serverErrors(cause, login));
       setPending(false);
     }
   };

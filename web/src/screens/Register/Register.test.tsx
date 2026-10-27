@@ -64,10 +64,21 @@ describe('Register', () => {
     expect(screen.getByLabelText('Логин')).toHaveAccessibleDescription('логин занят');
   });
 
-  it('shows 422 under the password field', async () => {
+  it('shows 422 for an invalid login under the login field', async () => {
     post.mockResolvedValue(apiError(422, 'validation_error', 'проверьте поля формы'));
     renderApp('/register');
     await fill('Alice', 'secret-pass');
+    expect(await screen.findByLabelText('Логин')).toHaveAccessibleDescription('проверьте поля формы');
+    expect(screen.getByLabelText('Пароль')).toHaveAccessibleDescription('');
+    expect(screen.getByLabelText('Логин')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('shows 422 for a valid login under the password field', async () => {
+    post.mockResolvedValue(apiError(422, 'validation_error', 'проверьте поля формы'));
+    renderApp('/register');
+    await fill('alice', 'secret-pass');
     expect(await screen.findByLabelText('Пароль')).toHaveAccessibleDescription('проверьте поля формы');
+    expect(screen.getByLabelText('Логин')).toHaveAccessibleDescription('');
+    expect(screen.getByLabelText('Пароль')).toHaveAttribute('aria-invalid', 'true');
   });
 });
