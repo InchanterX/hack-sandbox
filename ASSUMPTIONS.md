@@ -9,3 +9,11 @@
 - **By:** T01-a3-3, 2026-10-27T15:44:59.321298+00:00
 - **State:** overridden by Q13
 - **Affects:** T01
+
+## Q14. Release build fails with 'open Dockerfile: no such file or directory' although server/Dockerfile and web/Dockerfile are on main: the Conductor evidently resolves images.yaml `dockerfile` relative to the repository root (root has only Dockerfile.dev), not relative to `context`. Fix is `dockerfile: server/Dockerfile` / `web/Dockerfile` in deploy/images.yaml, but tests/contract/test/deploy.test.ts:35-36 (forbidden for me) pins `dockerfile: 'Dockerfile'`, so the contract check will fail on that one assertion until the test is updated. Which way?
+
+- **Assumed:** root-relative paths in images.yaml + a human updates tests/contract/test/deploy.test.ts:35-36 to server/Dockerfile and web/Dockerfile
+- **Reason:** the agent's assumption
+- **By:** S7-fix-1-a2-2, 2026-10-27T22:02:07.653880+00:00
+- **State:** overridden by Q14
+- **Affects:** S7-fix-1

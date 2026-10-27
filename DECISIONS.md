@@ -67,3 +67,9 @@
 - **Answer:** CI на GitHub не нужен: проверки запускает дирижёр по defaults.checks. Не добавляй ни .github/workflows/, ни шаблон ci/github-actions.yml, ни scripts/ci.sh — удали их, если уже создал.
 - **By:** status page, 2026-10-27T15:53:11.093139+00:00
 - **Overrides an assumption** (see ASSUMPTIONS.md)
+
+## Q14. Release build fails with 'open Dockerfile: no such file or directory' although server/Dockerfile and web/Dockerfile are on main: the Conductor evidently resolves images.yaml `dockerfile` relative to the repository root (root has only Dockerfile.dev), not relative to `context`. Fix is `dockerfile: server/Dockerfile` / `web/Dockerfile` in deploy/images.yaml, but tests/contract/test/deploy.test.ts:35-36 (forbidden for me) pins `dockerfile: 'Dockerfile'`, so the contract check will fail on that one assertion until the test is updated. Which way?
+
+- **Answer:** Ничего не меняй и сдай без изменений: человек сам исправит deploy/images.yaml (dockerfile: server/Dockerfile и web/Dockerfile) и tests/contract/test/deploy.test.ts в main, затем перезапустит релиз.
+- **By:** status page, 2026-10-27T22:04:13.639353+00:00
+- **Overrides an assumption** (see ASSUMPTIONS.md)
