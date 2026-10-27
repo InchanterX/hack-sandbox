@@ -123,7 +123,7 @@ func (p *parser) unary() (*node, error) {
 func (e Expr) Eval(ctx context.Context, beforeBinary func(context.Context) error) (float64, error) {
 	if e.root == nil {
 		if err := ctx.Err(); err != nil {
-			return 0, err
+			return 0, err //nolint:wrapcheck // Context errors are returned directly by contract.
 		}
 		return 0, ErrSyntax
 	}
@@ -147,7 +147,7 @@ func (e Expr) Eval(ctx context.Context, beforeBinary func(context.Context) error
 func finite(v float64) bool { return !math.IsInf(v, 0) && !math.IsNaN(v) }
 func (n *node) eval(ctx context.Context, callback func(context.Context) error) (float64, error) {
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return 0, err //nolint:wrapcheck // Context errors are returned directly by contract.
 	}
 	if n.op == 0 {
 		value, err := strconv.ParseFloat(n.literal, 64)
@@ -168,7 +168,7 @@ func (n *node) eval(ctx context.Context, callback func(context.Context) error) (
 		return 0, err
 	}
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return 0, err //nolint:wrapcheck // Context errors are returned directly by contract.
 	}
 	if callback != nil {
 		if err := callback(ctx); err != nil {
@@ -176,7 +176,7 @@ func (n *node) eval(ctx context.Context, callback func(context.Context) error) (
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return 0, err //nolint:wrapcheck // Context errors are returned directly by contract.
 	}
 	var value float64
 	switch n.op {

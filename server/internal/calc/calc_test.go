@@ -86,7 +86,9 @@ func collectFailed(items []struct {
 }
 func collectOverflow(items []struct {
 	Expression string `json:"expression"`
-}) []string { return collectFailed(items) }
+}) []string {
+	return collectFailed(items)
+}
 
 func TestCallbacksAndCancellation(t *testing.T) {
 	for _, tc := range []struct {
