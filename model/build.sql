@@ -193,18 +193,18 @@ ORDER BY trim(c.customer_unique_id), core.try_timestamp(o.order_purchase_timesta
 -- (customer_unique_id = NULL; сейчас таких 0).
 
 CREATE TABLE core.orders (
-    order_id                text PRIMARY KEY,
-    customer_unique_id      text REFERENCES core.customers,
-    source_customer_id      text NOT NULL UNIQUE,
-    order_status            text NOT NULL REFERENCES core.order_statuses,
-    purchased_at            timestamp NOT NULL,
-    approved_at             timestamp,
-    delivered_carrier_at    timestamp,
-    delivered_customer_at   timestamp,
-    estimated_delivery_date timestamp,
+    order_id                 text PRIMARY KEY,
+    customer_unique_id       text REFERENCES core.customers,
+    source_customer_id       text NOT NULL UNIQUE,
+    order_status             text NOT NULL REFERENCES core.order_statuses,
+    purchased_at             timestamp NOT NULL,
+    approved_at              timestamp,
+    delivered_carrier_at     timestamp,
+    delivered_customer_at    timestamp,
+    estimated_delivery_date  timestamp,
     delivery_zip_code_prefix text,
-    delivery_city           text,
-    delivery_state          text
+    delivery_city            text,
+    delivery_state           text
 );
 
 COMMENT ON TABLE core.orders IS
@@ -298,13 +298,13 @@ FROM raw.order_payments;
 -- (99 224 строки, 98 410 review_id), поэтому ключ — пара (review_id, order_id).
 
 CREATE TABLE core.order_reviews (
-    review_id      text NOT NULL,
-    order_id       text NOT NULL REFERENCES core.orders,
-    review_score   integer CHECK (review_score BETWEEN 1 AND 5),
-    comment_title  text,
+    review_id       text NOT NULL,
+    order_id        text NOT NULL REFERENCES core.orders,
+    review_score    integer CHECK (review_score BETWEEN 1 AND 5),
+    comment_title   text,
     comment_message text,
-    created_at     timestamp,
-    answered_at    timestamp,
+    created_at      timestamp,
+    answered_at     timestamp,
     PRIMARY KEY (review_id, order_id)
 );
 
