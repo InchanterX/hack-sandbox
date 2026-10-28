@@ -7,3 +7,9 @@
 - **Answer:** Добавил изменения в main выполни задание с начала
 - **By:** status page, 2026-10-28T10:32:10.371842+00:00
 - **Overrides an assumption** (see ASSUMPTIONS.md)
+
+## Q2. T01: brief/assets/solutions/ contains only README.md — no participant solutions, so ideas cannot be attributed to participants. Attribute key ideas in build.sql comments to the Fusion verdict checklist (member-2 fallback), brief/04_stack/sql.md, docs/tasks.md, or 'own decision'?
+
+- **Answer:** Добавил все нужные файлы в main, продолжи работу заново с полученной информацией
+- **By:** status page, 2026-10-28T10:33:54.181871+00:00
+- **Overrides an assumption** (see ASSUMPTIONS.md)

@@ -13,7 +13,7 @@
 ## Q2. T01: brief/assets/solutions/ contains only README.md — no participant solutions, so ideas cannot be attributed to participants. Attribute key ideas in build.sql comments to the Fusion verdict checklist (member-2 fallback), brief/04_stack/sql.md, docs/tasks.md, or 'own decision'?
 
 - **Assumed:** attribute to verdict/brief/own decision
-- **Reason:** only comments in model/build.sql; the model itself is driven by control numbers
+- **Reason:** the agent's assumption
 - **By:** T01-a1-6, 2026-10-28T10:32:53.996641+00:00
-- **State:** active
+- **State:** overridden by Q2
 - **Affects:** T01, T03
