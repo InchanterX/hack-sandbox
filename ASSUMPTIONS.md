@@ -9,3 +9,11 @@
 - **By:** T01-a1-5, 2026-10-28T10:29:31.910928+00:00
 - **State:** overridden by Q1
 - **Affects:** T01
+
+## Q2. T01: brief/assets/solutions/ contains only README.md — no participant solutions, so ideas cannot be attributed to participants. Attribute key ideas in build.sql comments to the Fusion verdict checklist (member-2 fallback), brief/04_stack/sql.md, docs/tasks.md, or 'own decision'?
+
+- **Assumed:** attribute to verdict/brief/own decision
+- **Reason:** only comments in model/build.sql; the model itself is driven by control numbers
+- **By:** T01-a1-6, 2026-10-28T10:32:53.996641+00:00
+- **State:** active
+- **Affects:** T01, T03
