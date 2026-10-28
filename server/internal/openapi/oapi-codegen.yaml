@@ -1,8 +1,0 @@
-# oapi-codegen v2.8.0 configuration (pinned via the tool directive in server/go.mod).
-# Regenerate with: npm --prefix tests/contract run generate
-package: openapi
-generate:
-  models: true
-output: internal/openapi/openapi.gen.go
-output-options:
-  skip-prune: true
