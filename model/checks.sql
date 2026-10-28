@@ -89,6 +89,31 @@ BEGIN
         RAISE EXCEPTION 'core.orders: % заказов без покупателя', actual_count;
     END IF;
 
+    -- Представления выручки собраны JOIN-ами без внешних ключей: позиции не теряются
+    -- и не размножаются, а сумма по заказам равна сумме по позициям.
+    SELECT count(*), sum(i.price) INTO expected_count, raw_amount
+    FROM core.order_items AS i
+    JOIN core.orders AS o ON o.order_id = i.order_id
+    WHERE o.order_status IN (SELECT order_status FROM core.order_statuses WHERE counts_as_revenue);
+    SELECT count(*), sum(revenue) INTO actual_count, core_amount FROM core.revenue_items;
+    IF actual_count <> expected_count OR raw_amount IS DISTINCT FROM core_amount THEN
+        RAISE EXCEPTION 'core.revenue_items: ожидалось % позиций на %, получено % на %',
+            expected_count, raw_amount, actual_count, core_amount;
+    END IF;
+    SELECT count(*) INTO actual_count
+    FROM core.revenue_items AS r
+    LEFT JOIN core.order_items AS i USING (order_id, order_item_id)
+    WHERE i.order_id IS NULL;
+    IF actual_count <> 0 THEN
+        RAISE EXCEPTION 'core.revenue_items: % строк-сирот без core.order_items', actual_count;
+    END IF;
+    SELECT count(DISTINCT order_id) INTO expected_count FROM core.revenue_items;
+    SELECT count(*), sum(revenue) INTO actual_count, raw_amount FROM core.revenue_orders;
+    IF actual_count <> expected_count OR raw_amount IS DISTINCT FROM core_amount THEN
+        RAISE EXCEPTION 'core.revenue_orders: ожидалось % заказов на %, получено % на %',
+            expected_count, core_amount, actual_count, raw_amount;
+    END IF;
+
     -- Проверяем зерно независимо от ограничений и представления, собираемые JOIN-ами.
     FOR check_row IN
         SELECT * FROM (VALUES
