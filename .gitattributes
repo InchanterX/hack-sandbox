@@ -1,0 +1,4 @@
+# Скрипты запускаются в Linux-контейнерах: всегда LF, даже в клонах на Windows.
+*.sh  text eol=lf
+*.sql text eol=lf
+*.py  text eol=lf

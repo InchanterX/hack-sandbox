@@ -1,0 +1,35 @@
+# Окружение проверок оркестра. Людям оно не нужно: у вас docker-compose.yml и scripts/setup.sh.
+# Полная проверка с нуля:  docker compose -f compose.checks.yaml run --rm dev sh checks/run.sh
+# Решение участника:       docker compose -f compose.checks.yaml run --rm dev sh checks/run.sh brief/assets/solutions/<имя>
+# После:                   docker compose -f compose.checks.yaml down -v
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hack
+      POSTGRES_PASSWORD: hack
+      POSTGRES_DB: marketplace
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - ./scripts/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hack -d marketplace"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /src
+    volumes:
+      - .:/src
+    environment:
+      PGHOST: db
+      PGUSER: hack
+      PGPASSWORD: hack
+      PGDATABASE: marketplace
+    depends_on:
+      db:
+        condition: service_healthy

@@ -1,0 +1,105 @@
+# План кейса Capibara. Загрузка: orchestra-conductor plan load tasks.yaml
+version: 1
+project_id: capibara
+
+# Задачи их не меняют: при нужде — вопрос людям.
+shared_files:
+  - compose.checks.yaml
+  - Dockerfile.dev
+  - checks/**
+  - docs/**
+  - scripts/**
+  - docker-compose.yml
+  - README.md
+  - tasks.yaml
+
+defaults:
+  max_attempts: 3
+  check_env: { kind: compose, file: compose.checks.yaml, service: dev }
+  checks:
+    - { name: model, cmd: sh checks/run.sh, timeout_s: 1200 }
+
+tasks:
+  - id: T01
+    title: Итоговая модель core и ответы блока А по лучшим идеям решений участников
+    tier: T1
+    mode: fusion
+    fusion:
+      providers: [claude, codex]
+      question: >-
+        В brief/assets/solutions/ лежат независимые решения участников команды, по папке на
+        человека, в произвольном виде (SQL, заметки). Прочитайте их код. Задание —
+        docs/handout.md и docs/tasks.md, правила — brief/04_stack/sql.md. Разберите решения и
+        предложите одну итоговую модель core и витрины блока А. Критерии по убыванию важности:
+        (1) все 5 контрольных цифр сходятся, и понятно почему; (2) модель описывает предметную
+        область и выдержит 5 новых вопросов и вброс в середине хакатона без перестройки;
+        (3) каждое решение команда сможет объяснить на защите — простое лучше хитрого;
+        (4) ничего не теряется молча при переносе raw -> core. Для каждого ключевого решения
+        (ключ покупателя, определение выручки и статусов, зерно таблиц, пропуски категорий,
+        дубли, типизация) скажите, из какого решения участника оно взято или почему вы
+        предлагаете своё. Вердикт — конкретный план: таблицы core с колонками, ключами и зерном,
+        определения выручки, витрины mart.a1..a5.
+    owned_files: ["model/build.sql", "mart/answers_a.sql"]
+    acceptance_criteria:
+      - model/build.sql собирает core из raw на чистой базе и повторно без ошибок; raw не меняется
+      - Все 5 контрольных цифр блока А сходятся (checks/run.sh заканчивается OK)
+      - Витрины mart.a1..a5 строятся только по core и имеют формат из brief/04_stack/sql.md
+      - У каждой таблицы core есть первичный ключ и комментарий с зерном; определение выручки — в одном месте
+      - В комментариях build.sql указано, из чьего решения взята каждая ключевая идея (по вердикту)
+    context_refs: [docs/handout.md, docs/tasks.md, brief/assets/solutions/]
+    stack: [sql]
+    estimate_min: 45
+
+  - id: T02
+    title: Самопроверки модели — ничего не потеряно при переносе raw -> core
+    depends_on: [T01]
+    tier: T2
+    owned_files: ["model/checks.sql"]
+    acceptance_criteria:
+      - Для каждой таблицы core сверено число строк с raw; осознанные исключения посчитаны явно
+      - Сверены суммы денег (цены, доставка, оплаты) raw против core
+      - Проверены уникальность зерна и отсутствие сирот там, где внешний ключ не объявлен
+      - На текущей модели проверки проходят; при порче модели (потеря строк) падают с понятным сообщением
+      - Если проверка находит реальный дефект build.sql — не ослабляйте её, а опишите дефект в вопросе людям
+    context_refs: [model/build.sql, docs/tasks.md]
+    stack: [sql]
+    estimate_min: 25
+
+  - id: T03
+    title: Записка о решениях (полстраницы)
+    depends_on: [T01]
+    tier: T2
+    owned_files: ["report/decisions.md"]
+    acceptance_criteria:
+      - Не длиннее половины страницы; что выбрали, от чего отказались и почему
+      - Покрывает ключ покупателя, определение выручки, зерно таблиц, пропуски и дубли, как убедились, что ничего не потеряно
+      - Каждое утверждение соответствует model/build.sql
+    context_refs: [model/build.sql, mart/answers_a.sql, docs/handout.md, brief/assets/solutions/]
+    stack: [docs]
+    estimate_min: 15
+
+  - id: T04
+    title: Концепция дашборда
+    depends_on: [T01]
+    tier: T2
+    owned_files: ["report/dashboard.md"]
+    acceptance_criteria:
+      - Названа область, вопросы, на которые отвечает дашборд, и кто по нему принимает решения
+      - Для каждого показателя есть формула, уровень расчёта и таблицы core, из которых он берётся
+      - Отдельно перечислены показатели, которые нельзя складывать по срезам, с объяснением
+    context_refs: [model/build.sql, mart/answers_a.sql, docs/handout.md]
+    stack: [docs]
+    estimate_min: 20
+
+  - id: T05
+    title: Стратегия развития модели и технологий
+    depends_on: [T01]
+    tier: T2
+    owned_files: ["report/strategy.md"]
+    acceptance_criteria:
+      - Названы новые сущности, места, где нужна историчность, и что упрётся первым при росте
+      - Технологическая часть с порогами объёмов для PostgreSQL и обоснованием следующего шага
+      - Опирается на текущую модель из model/build.sql, а не на абстрактную
+    context_refs: [model/build.sql, docs/handout.md]
+    stack: [docs]
+    estimate_min: 20
