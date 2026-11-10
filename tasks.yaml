@@ -1,42 +1,101 @@
 # yaml-language-server: $schema=https://github.com/InchanterX/the-silent-orchestra/contracts/schemas/tasks-file.schema.json
-# S3: plan DAG. Validate with `orchestra validate-tasks tasks.yaml`.
-# Patterns are gitignore-style globs anchored at the repo root ("**/x" = any depth).
+# S6 exact-message acceptance and S7 release are pipeline stages, not S5 tasks.
 version: 1
 project_id: sandbox-release
 
-shared_files:            # owned by scaffold; tasks ask the Conductor to change these
-  - package.json
+# Only the scaffold creates/verifies these files; later tasks do not own them.
+shared_files:
   - compose.yaml
-  - deploy/images.yaml
+  - app/Dockerfile
+  - deploy/**
 
 defaults:
   max_attempts: 3
-  check_env: { kind: compose, file: compose.yaml, service: dev }
+  check_env: {kind: compose, file: compose.yaml, service: dev}
   checks:
-    - { name: lint, cmd: "npm run lint" }
-    - { name: unit, cmd: "npm test" }
-    - { name: contract, cmd: "npm run test:contract" }
+    - name: contract
+      cmd: python -m unittest discover -s tests/contract -v
+  # One backend area, already covered by checks; no additional lint/dependencies.
+  stack_checks:
+    backend: []
+  e2e:
+    name: e2e
+    cmd: python -m unittest discover -s tests/e2e -v
 
 tasks:
   - id: T01
-    title: Scaffold
+    title: Verify the existing release smoke scaffold and image metadata
     stage: S4
     mode: solo
     tier: T1
     owned_files: ["**"]
     acceptance_criteria:
-      - compose up starts every service; stubs answer per contracts/
-      - contract tests exist and run in CI
-    context_refs: [SPEC.md, contracts/]
-    stack: [backend, frontend, devops]
-    estimate_min: 30
+      - >-
+        Compose dev works with no environment variables or secrets, has the
+        checkout at /workspace, and runs the Python 3.14 service as UID 10001
+        with its existing default port 8080.
+      - >-
+        At the scaffold stage GET /healthz returns 200 and {"status":"ok"},
+        GET / returns 200 and {"message":"seed"}, and GET /not-a-route returns
+        404 and {"error":"not_found"}; all three have application/json content type.
+      - >-
+        deploy/images.yaml describes exactly one image named api, context '.',
+        dockerfile app/Dockerfile, accepted by the Conductor image loader and
+        matching the api image reference in the existing demo manifests.
+      - >-
+        The demo overlay targets hack-sandbox-release; Deployment and ClusterIP
+        Service smoke-api have matching app selectors, Service port 8080 targets
+        container port http:8080, and both health probes target /healthz on http.
+        Existing non-root, read-only filesystem, capability and resource settings
+        remain; no HTTPRoute or additional cluster resources are introduced.
+      - >-
+        A reviewer can read docs/scaffold-smoke.md for the verified files,
+        metadata correction, exact Compose contract and existing e2e commands,
+        their actual outcomes and any blockers. Existing contract checks and
+        process smoke both succeed while the root message remains seed.
+    context_refs:
+      - SPEC.md#модули-и-границы
+      - SPEC.md#упаковка-и-релиз
+      - SPEC.md#проверки-и-dag
+      - contracts/README.md
+      - contracts/openapi.yaml
+      - contracts/schema.sql
+      - contracts/types.py
+      - PLAN.md
+      - brief/04_stack/00_overview.md
+      - brief/05_conventions.md
+      - brief/08_deploy.md
+    stack: [backend]
+    estimate_min: 8
 
   - id: T02
-    title: Example feature
+    title: Return the final sandbox-release smoke message
+    stage: S5
+    mode: solo
+    tier: T3
     depends_on: [T01]
-    tier: T2
-    owned_files: ["src/feature/**"]
-    acceptance_criteria: [Describe an observable outcome]
-    context_refs: [SPEC.md]
-    stack: [backend]          # brief/04_stack/backend.md goes into the packet
-    estimate_min: 25
+    owned_files: [app/server.py]
+    acceptance_criteria:
+      - >-
+        GET / returns 200, Content-Type application/json, and exactly
+        {"message":"sandbox-release smoke"} as the decoded JSON object.
+      - >-
+        GET /healthz still returns 200 with exactly {"status":"ok"}; an unknown
+        GET target such as /not-a-route still returns 404 with exactly
+        {"error":"not_found"}; both have Content-Type application/json.
+      - >-
+        The real process still accepts --host 127.0.0.1 --port 0, announces its
+        actual port as LISTENING=<port>, and serves health and the final message
+        on that port; the default invocation remains 0.0.0.0:8080.
+    context_refs:
+      - SPEC.md#http
+      - SPEC.md#процесс
+      - SPEC.md#проверки-и-dag
+      - contracts/openapi.yaml
+      - contracts/types.py
+      - PLAN.md
+      - brief/04_stack/00_overview.md
+      - brief/05_conventions.md
+      - brief/06_contracts.md
+    stack: [backend]
+    estimate_min: 2
