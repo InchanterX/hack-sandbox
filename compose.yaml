@@ -1,0 +1,9 @@
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    working_dir: /workspace
+    command: [python, app/server.py]
+    volumes:
+      - .:/workspace
