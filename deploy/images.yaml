@@ -3,5 +3,6 @@
 # <registry>/hack-<project>/<name>:<sha>. Owned by scaffold (S4); list it in shared_files.
 version: 1
 images:
-  - name: app
+  - name: api
     context: .
+    dockerfile: app/Dockerfile
