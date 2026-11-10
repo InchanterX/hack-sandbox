@@ -1,0 +1,4 @@
+-- sandbox-repair has no database or persistent application state.
+-- Schema: no tables, indexes, migrations, credentials or SQL service.
+-- The response message is a constant in app/server.py, not stored data.
+-- This documentation-only file intentionally contains no executable SQL.

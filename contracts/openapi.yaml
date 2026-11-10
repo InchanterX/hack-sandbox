@@ -1,0 +1,84 @@
+openapi: 3.1.0
+info:
+  title: sandbox-repair release smoke
+  version: 1.0.0
+  description: >-
+    Final API after S5, served by the existing Python standard-library server.
+    The local S4 seed response is transitional and must never pass release
+    acceptance. No authentication, request bodies or query parameters.
+    Request targets are matched literally; query strings, trailing slashes
+    and all other unknown GET targets return the NotFound response.
+servers:
+  - url: http://127.0.0.1:8080
+    description: Local server; demo access is through operator port-forward.
+security: []
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      summary: Report process health
+      responses:
+        '200':
+          description: The server is accepting HTTP requests.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example: {status: ok}
+  /:
+    get:
+      operationId: getMessage
+      summary: Return the release smoke message
+      responses:
+        '200':
+          description: The release message is installed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example: {message: sandbox-repair smoke}
+# OpenAPI paths enumerate the two supported operations. This extension records
+# the existing server's fallback rather than introducing a catch-all endpoint.
+x-unknown-get-response:
+  method: GET
+  description: >-
+    Every request target other than exactly / or /healthz, including nested
+    paths and targets containing a query string, returns status 404.
+  example_request_target: /not-a-route
+  status: 404
+  response:
+    $ref: '#/components/responses/NotFound'
+components:
+  responses:
+    NotFound:
+      description: The GET request target is not recognized.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {error: not_found}
+  schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    MessageResponse:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        message:
+          type: string
+          enum: [sandbox-repair smoke]
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum: [not_found]
