@@ -1,42 +1,99 @@
 # yaml-language-server: $schema=https://github.com/InchanterX/the-silent-orchestra/contracts/schemas/tasks-file.schema.json
-# S3: plan DAG. Validate with `orchestra validate-tasks tasks.yaml`.
-# Patterns are gitignore-style globs anchored at the repo root ("**/x" = any depth).
+# S3: implementation DAG; standard S6 integration and S7 release follow it.
+# Validate with `orchestra validate-tasks tasks.yaml` in the Conductor environment.
+# Patterns are gitignore-style globs anchored at the repository root.
 version: 1
 project_id: sandbox-repair
 
-shared_files:            # owned by scaffold; tasks ask the Conductor to change these
-  - package.json
+shared_files:
+  - app/Dockerfile
+  - .dockerignore
   - compose.yaml
   - deploy/images.yaml
+  - deploy/base/deployment.yaml
+  - deploy/base/service.yaml
+  - deploy/base/kustomization.yaml
+  - deploy/overlays/demo/kustomization.yaml
+  - tests/contract/**
+  - docs/scaffold-smoke.md
 
 defaults:
   max_attempts: 3
-  check_env: { kind: compose, file: compose.yaml, service: dev }
+  check_env: {kind: compose, file: compose.yaml, service: dev}
   checks:
-    - { name: lint, cmd: "npm run lint" }
-    - { name: unit, cmd: "npm test" }
-    - { name: contract, cmd: "npm run test:contract" }
+    - {name: contract, cmd: 'python -m unittest discover -s tests/contract -v'}
+  e2e: {name: e2e, cmd: 'python -m unittest discover -s tests/e2e -v'}
+  # The sole backend area is covered by the common contract command.
+  stack_checks:
+    backend: []
 
 tasks:
   - id: T01
-    title: Scaffold
+    title: Reconcile the existing Python release smoke scaffold
     stage: S4
     mode: solo
     tier: T1
+    depends_on: []
+    # Required scaffold wildcard; actual scope and protected files are in SPEC.
     owned_files: ["**"]
     acceptance_criteria:
-      - compose up starts every service; stubs answer per contracts/
-      - contract tests exist and run in CI
-    context_refs: [SPEC.md, contracts/]
-    stack: [backend, frontend, devops]
-    estimate_min: 30
+      - >-
+        With no environment variables or secrets supplied, Compose dev runs the
+        mounted checkout in /workspace using Python 3.14 as UID/GID 10001;
+        GET /healthz returns 200 application/json with exactly {"status":"ok"}
+        and GET /not-a-route returns 404 application/json with exactly
+        {"error":"not_found"}.
+      - >-
+        Before S5, GET / still returns 200 application/json with exactly
+        {"message":"seed"} from the existing server running as a separate
+        process on its announced listening port.
+      - >-
+        The image catalog exposes exactly one buildable image named api with
+        context . and Dockerfile app/Dockerfile; its container starts the
+        existing HTTP server on port 8080 without external dependencies.
+      - >-
+        The demo overlay resolves to Deployment and ClusterIP Service smoke-api
+        in hack-sandbox-repair, using image name api, matching app selectors,
+        named http port 8080 and readiness/liveness GET /healthz; the existing
+        non-root and container security restrictions remain in effect.
+      - >-
+        The operator can read docs/scaffold-smoke.md for inspected file paths,
+        actual configuration repairs and results of both baseline commands;
+        demo access remains port-forward with no new cluster resource kinds.
+    context_refs:
+      - SPEC.md
+      - contracts/README.md
+      - contracts/openapi.yaml
+      - contracts/schema.sql
+      - contracts/types.py
+      - PLAN.md
+      - brief/08_deploy.md
+    stack: [backend]
+    estimate_min: 8
 
   - id: T02
-    title: Example feature
+    title: Set the release smoke message without changing server behaviour
+    stage: S5
+    mode: solo
     depends_on: [T01]
-    tier: T2
-    owned_files: ["src/feature/**"]
-    acceptance_criteria: [Describe an observable outcome]
-    context_refs: [SPEC.md]
-    stack: [backend]          # brief/04_stack/backend.md goes into the packet
-    estimate_min: 25
+    tier: T3
+    owned_files: [app/server.py]
+    acceptance_criteria:
+      - >-
+        GET / returns 200 application/json with exactly
+        {"message":"sandbox-repair smoke"}.
+      - >-
+        GET /healthz continues to return 200 application/json with exactly
+        {"status":"ok"}.
+      - >-
+        GET /not-a-route continues to return 404 application/json with exactly
+        {"error":"not_found"}.
+    context_refs:
+      - SPEC.md#http-сервис
+      - SPEC.md#контракты
+      - contracts/openapi.yaml
+      - contracts/types.py
+      - PLAN.md
+      - brief/04_stack/backend.md
+    stack: [backend]
+    estimate_min: 2
