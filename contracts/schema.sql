@@ -1,0 +1,4 @@
+-- sandbox-release storage contract: no database or persistent storage.
+-- The service has no tables, migrations, database connection, or DB secrets.
+-- MESSAGE is a source constant in app/server.py, never a stored record.
+-- This intentionally comment-only file requires no SQL engine or execution.

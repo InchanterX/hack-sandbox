@@ -1,0 +1,82 @@
+openapi: 3.1.0
+info:
+  title: sandbox-release smoke
+  version: 1.0.0
+  description: >-
+    Final contract after S5 for the existing Python HTTP service. S4 keeps the
+    seed root message; S6 verifies the final message in a real process.
+    Exact GET request targets /healthz and / return the documented 200 JSON.
+    Every other GET request target returns 404 JSON NotFoundResponse, including
+    targets with query strings. /not-a-route is a representative unknown path,
+    not a special route. Other HTTP methods are outside this smoke contract.
+servers:
+  - url: http://localhost:8080
+    description: Local service or operator-provided port-forward
+security: []
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      summary: Read service health
+      responses:
+        '200':
+          description: The process is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example: {status: ok}
+  /:
+    get:
+      operationId: getMessage
+      summary: Read the final release smoke message
+      responses:
+        '200':
+          description: Exact final response after S5; S4 still returns seed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example: {message: sandbox-release smoke}
+  /not-a-route:
+    get:
+      operationId: getUnknownRoute
+      summary: Observe the fallback for any unknown GET request target
+      description: Representative request for the universal unknown-target rule.
+      responses:
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  responses:
+    NotFound:
+      description: No route matches the exact GET request target.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/NotFoundResponse'
+          example: {error: not_found}
+  schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    MessageResponse:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        message:
+          type: string
+          enum: [sandbox-release smoke]
+    NotFoundResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum: [not_found]
