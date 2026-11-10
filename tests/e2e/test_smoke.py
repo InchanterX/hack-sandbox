@@ -4,8 +4,8 @@ import subprocess
 import sys
 import threading
 import unittest
+from http.client import HTTPConnection
 from pathlib import Path
-from urllib.request import urlopen
 
 
 class HttpProcessSmoke(unittest.TestCase):
@@ -32,10 +32,23 @@ class HttpProcessSmoke(unittest.TestCase):
             line = lines.get(timeout=10)
             self.assertTrue(line.startswith("LISTENING="), line)
             port = int(line.split("=", 1)[1])
-            with urlopen(f"http://127.0.0.1:{port}/healthz", timeout=5) as response:
-                self.assertEqual(json.load(response), {"status": "ok"})
-            with urlopen(f"http://127.0.0.1:{port}/", timeout=5) as response:
-                self.assertIsInstance(json.load(response)["message"], str)
+            for path, expected_status, expected in (
+                ("/healthz", 200, {"status": "ok"}),
+                ("/", 200, {"message": "sandbox-repair smoke"}),
+                ("/not-a-route", 404, {"error": "not_found"}),
+            ):
+                with self.subTest(path=path):
+                    connection = HTTPConnection("127.0.0.1", port, timeout=5)
+                    try:
+                        connection.request("GET", path)
+                        response = connection.getresponse()
+                        self.assertEqual(response.status, expected_status)
+                        self.assertEqual(response.getheader("Content-Type"), "application/json")
+                        body = response.read()
+                        self.assertEqual(int(response.getheader("Content-Length")), len(body))
+                        self.assertEqual(json.loads(body), expected)
+                    finally:
+                        connection.close()
         finally:
             process.terminate()
             try:
