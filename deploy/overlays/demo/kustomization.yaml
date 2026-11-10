@@ -1,8 +1,9 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: hack-sandbox-repair
-resources: [../../base]
+resources:
+- ../../base
 images:
-  - name: api
-    newName: registry.faberge-eggs.ru/hackathons/sandbox-repair/api
-    newTag: seed
+- name: api
+  newName: registry.faberge-eggs.ru/hackathons/sandbox-repair/api
+  newTag: eeec566437436725235f6ecd9e0b1bee8c8506a8
