@@ -4,7 +4,7 @@ import argparse
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-MESSAGE = "seed"
+MESSAGE = "sandbox-release smoke"
 
 
 class Handler(BaseHTTPRequestHandler):
