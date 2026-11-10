@@ -9,8 +9,9 @@ workspace. This report does not establish a successful build or deployment.
 ## Verified files and correction
 
 The only scaffold configuration change is `deploy/images.yaml`: renamed image
-`app` to `api` and added the explicit Dockerfile path. Without that path the
-loader defaults to a root `Dockerfile`, which this repository does not have.
+`app` to `api` and added the explicit Dockerfile path. The old metadata omitted
+that path (the loader returned `dockerfile=None`), although the Dockerfile lives
+at `app/Dockerfile` and there is no root `Dockerfile`.
 The corrected file describes exactly one image:
 
 ```yaml
