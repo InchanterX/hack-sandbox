@@ -1,8 +1,9 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: hack-sandbox-release
-resources: [../../base]
+resources:
+- ../../base
 images:
-  - name: api
-    newName: registry.faberge-eggs.ru/hackathons/sandbox-release/api
-    newTag: seed
+- name: api
+  newName: registry.faberge-eggs.ru/hackathons/sandbox-release/api
+  newTag: 5f897f1b77c5f7e113b2c7c6594ee9f471d982b2
