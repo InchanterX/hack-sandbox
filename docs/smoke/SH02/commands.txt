@@ -1,2 +1,2 @@
-pods:2
+pods:0
 events:0
