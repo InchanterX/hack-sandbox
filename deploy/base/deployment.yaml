@@ -28,7 +28,7 @@ spec:
           containerPort: 8080
         readinessProbe:
           httpGet:
-            path: /smoke-intentionally-missing
+            path: /healthz
             port: http
           periodSeconds: 2
           timeoutSeconds: 1
