@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://github.com/InchanterX/the-silent-orchestra/contracts/schemas/tasks-file.schema.json
-# S3 backlog round 1: only new tasks; completed T01/T02 remain in history.
-# No S4: the existing scaffold is reused; T01 is a completed external dependency.
+# S3 backlog round 2: only new tasks; completed T01/T02/T03 remain in history.
+# No S4: reuse the scaffold through completed T03 -> T01 dependencies.
 # Validate with `orchestra validate-tasks tasks.yaml` in the Conductor environment.
 # Patterns are gitignore-style globs anchored at the repository root.
 version: 1
@@ -29,38 +29,44 @@ defaults:
     backend: []
 
 tasks:
-  - id: T03
-    title: Document the repeat release smoke for readiness recovery
+  - id: T04
+    title: Extend the smoke procedure for a repeat after inject Git authorization
     stage: S5
     mode: solo
     tier: T3
-    depends_on: [T01]
+    depends_on: [T03]
     owned_files: [docs/smoke/repair-round.md]
     acceptance_criteria:
       - >-
-        The operator can read a short docs/smoke/repair-round.md describing
-        readiness recovery verification for smoke-api in hack-sandbox-repair,
-        from the initial Ready state through an observed NotReady state to
-        restored Ready/Available, Argo Healthy and the expected release SHA.
+        The existing docs/smoke/repair-round.md has a short addition describing
+        a new release smoke run after inject Git authorization is configured
+        by the operator, without including credentials or Git configuration
+        changes in the S5 work.
       - >-
-        The instructions assign intentional readiness fault injection and
-        recovery to the S7 operator; S5 delivers only the new document and
+        The repeat procedure assigns intentional readiness fault injection,
+        recovery and cluster verification to the S7 operator for smoke-api
+        in hack-sandbox-repair, covering initial Ready/Available, observed
+        NotReady and restored Ready/Available, Argo Healthy and the expected
+        deployed release SHA. S5 only extends the existing document and
         preserves application behaviour, Dockerfile, Kubernetes manifests,
         existing checks and historical smoke reports.
       - >-
-        The recovery instructions include port-forward verification of
+        The repeat procedure includes post-recovery port-forward verification of
         GET /healthz returning 200 with exactly {"status":"ok"}, GET /
         returning 200 with exactly {"message":"sandbox-repair smoke"}, and
         GET /not-a-route returning 404 with exactly {"error":"not_found"};
         every response has Content-Type application/json.
       - >-
-        The document requests fresh evidence before injection, while NotReady
-        and after recovery, and identifies unavailable infrastructure as an
-        unpassed release gate rather than claiming a successful recovery.
+        The addition requests fresh evidence from this repeat run before
+        injection, while NotReady and after recovery, including HTTP responses;
+        previous smoke results do not establish success. Missing inject
+        authorization, unavailable infrastructure or missing evidence leaves
+        the release gate unpassed; the procedure does not claim the run passed.
     context_refs:
-      - BACKLOG.md#раунд-1
-      - SPEC.md#раунд-1-восстановление-readiness
+      - BACKLOG.md#раунд-2
+      - SPEC.md#раунд-2-повтор-после-настройки-git-авторизации-inject
       - SPEC.md#контракты
+      - docs/smoke/repair-round.md
       - contracts/openapi.yaml
       - brief/08_deploy.md
     stack: [backend]
