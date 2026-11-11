@@ -1,5 +1,6 @@
 # yaml-language-server: $schema=https://github.com/InchanterX/the-silent-orchestra/contracts/schemas/tasks-file.schema.json
-# S3: implementation DAG; standard S6 integration and S7 release follow it.
+# S3 backlog round 1: only new tasks; completed T01/T02 remain in history.
+# No S4: the existing scaffold is reused; T01 is a completed external dependency.
 # Validate with `orchestra validate-tasks tasks.yaml` in the Conductor environment.
 # Patterns are gitignore-style globs anchored at the repository root.
 version: 1
@@ -28,72 +29,39 @@ defaults:
     backend: []
 
 tasks:
-  - id: T01
-    title: Reconcile the existing Python release smoke scaffold
-    stage: S4
-    mode: solo
-    tier: T1
-    depends_on: []
-    # Required scaffold wildcard; actual scope and protected files are in SPEC.
-    owned_files: ["**"]
-    acceptance_criteria:
-      - >-
-        With no environment variables or secrets supplied, Compose dev runs the
-        mounted checkout in /workspace using Python 3.14 as UID/GID 10001;
-        GET /healthz returns 200 application/json with exactly {"status":"ok"}
-        and GET /not-a-route returns 404 application/json with exactly
-        {"error":"not_found"}.
-      - >-
-        Before S5, GET / still returns 200 application/json with exactly
-        {"message":"seed"} from the existing server running as a separate
-        process on its announced listening port.
-      - >-
-        The image catalog exposes exactly one buildable image named api with
-        context . and Dockerfile app/Dockerfile; its container starts the
-        existing HTTP server on port 8080 without external dependencies.
-      - >-
-        The demo overlay resolves to Deployment and ClusterIP Service smoke-api
-        in hack-sandbox-repair, using image name api, matching app selectors,
-        named http port 8080 and readiness/liveness GET /healthz; the existing
-        non-root and container security restrictions remain in effect.
-      - >-
-        The operator can read docs/scaffold-smoke.md for inspected file paths,
-        actual configuration repairs and results of both baseline commands;
-        demo access remains port-forward with no new cluster resource kinds.
-    context_refs:
-      - SPEC.md
-      - contracts/README.md
-      - contracts/openapi.yaml
-      - contracts/schema.sql
-      - contracts/types.py
-      - PLAN.md
-      - brief/08_deploy.md
-    stack: [backend]
-    estimate_min: 8
-
-  - id: T02
-    title: Set the release smoke message without changing server behaviour
+  - id: T03
+    title: Document the repeat release smoke for readiness recovery
     stage: S5
     mode: solo
-    depends_on: [T01]
     tier: T3
-    owned_files: [app/server.py]
+    depends_on: [T01]
+    owned_files: [docs/smoke/repair-round.md]
     acceptance_criteria:
       - >-
-        GET / returns 200 application/json with exactly
-        {"message":"sandbox-repair smoke"}.
+        The operator can read a short docs/smoke/repair-round.md describing
+        readiness recovery verification for smoke-api in hack-sandbox-repair,
+        from the initial Ready state through an observed NotReady state to
+        restored Ready/Available, Argo Healthy and the expected release SHA.
       - >-
-        GET /healthz continues to return 200 application/json with exactly
-        {"status":"ok"}.
+        The instructions assign intentional readiness fault injection and
+        recovery to the S7 operator; S5 delivers only the new document and
+        preserves application behaviour, Dockerfile, Kubernetes manifests,
+        existing checks and historical smoke reports.
       - >-
-        GET /not-a-route continues to return 404 application/json with exactly
-        {"error":"not_found"}.
+        The recovery instructions include port-forward verification of
+        GET /healthz returning 200 with exactly {"status":"ok"}, GET /
+        returning 200 with exactly {"message":"sandbox-repair smoke"}, and
+        GET /not-a-route returning 404 with exactly {"error":"not_found"};
+        every response has Content-Type application/json.
+      - >-
+        The document requests fresh evidence before injection, while NotReady
+        and after recovery, and identifies unavailable infrastructure as an
+        unpassed release gate rather than claiming a successful recovery.
     context_refs:
-      - SPEC.md#http-сервис
+      - BACKLOG.md#раунд-1
+      - SPEC.md#раунд-1-восстановление-readiness
       - SPEC.md#контракты
       - contracts/openapi.yaml
-      - contracts/types.py
-      - PLAN.md
-      - brief/04_stack/backend.md
+      - brief/08_deploy.md
     stack: [backend]
-    estimate_min: 2
+    estimate_min: 5
