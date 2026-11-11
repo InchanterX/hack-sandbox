@@ -61,3 +61,24 @@ expected release SHA; and all three port-forward responses match exactly.
 If the cluster, Argo, port-forward, or required evidence is unavailable, record
 the gate as **not passed** and state what could not be verified. A local check
 or historical smoke report does not establish successful recovery.
+
+## Repeat run after inject Git authorization
+
+Run this procedure again only after the operator has configured Git
+authorization for inject. That authorization is an operator prerequisite; this
+S5 change does not alter Git configuration or handle credentials. S7 remains
+responsible for the intentional readiness fault, its recovery, and all cluster
+verification for `smoke-api` in `hack-sandbox-repair`.
+
+For this repeat, collect fresh evidence before injection showing the initial
+Deployment Ready/Available, Argo Healthy, and the expected release SHA; while
+the injected fault is active, showing NotReady; and after recovery, showing
+Ready/Available, Argo Healthy, and the expected deployed release SHA. Then
+repeat all three port-forward HTTP requests above and retain their status,
+`Content-Type`, and exact JSON response bodies as evidence. Previous smoke
+results do not establish success for this run.
+
+Missing inject authorization, unavailable infrastructure, or missing evidence
+at any required stage leaves this repeat's release gate **not passed**. This
+is a prospective procedure and does not claim that the repeat has run or
+passed.
