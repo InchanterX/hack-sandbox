@@ -36,6 +36,11 @@ class HttpProcessSmoke(unittest.TestCase):
                 ("/healthz", 200, {"status": "ok"}),
                 ("/", 200, {"message": "sandbox-repair smoke"}),
                 ("/not-a-route", 404, {"error": "not_found"}),
+                # Request targets match literally, including query and slash.
+                ("/?demo=1", 404, {"error": "not_found"}),
+                ("/healthz?demo=1", 404, {"error": "not_found"}),
+                ("/healthz/", 404, {"error": "not_found"}),
+                ("/not-a-route/nested", 404, {"error": "not_found"}),
             ):
                 with self.subTest(path=path):
                     connection = HTTPConnection("127.0.0.1", port, timeout=5)
