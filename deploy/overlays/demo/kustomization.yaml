@@ -6,4 +6,4 @@ resources:
 images:
 - name: api
   newName: registry.faberge-eggs.ru/hackathons/sandbox-repair/api
-  newTag: f15e5a3f7192d066ebd1b2b74b4e486e9cab7e3c
+  newTag: 0390dc21ac436ad874f358fc1a16271b13235151
